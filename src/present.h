@@ -35,6 +35,8 @@ int present_signs(present_sign_t out[PRESENT_MAX_SIGNS]);
 sg_view present_slide_texture(int slide);
 // camera requested by the slide that just started (-1 = none); clears the request
 int present_take_camera_request(void);
+// sunset duration (s) requested by a '@futurecity' slide that just started (0 = none); clears it
+float present_take_future_request(void);
 // 1 while a slide that wants a close-up (image slides, '@zoom on') is presenting, else 0
 float present_zoom_target(void);
 // traffic index of the van whose slide is currently presented (-1 if none)

@@ -7,7 +7,7 @@ FRAMEWORKS = -framework Cocoa -framework QuartzCore -framework Metal -framework 
 
 BUILD   = build
 TARGET  = $(BUILD)/highway
-C_SRCS  = src/main.c src/mesh.c src/world.c src/textures.c src/cars.c src/present.c src/chart.c
+C_SRCS  = src/main.c src/mesh.c src/world.c src/city.c src/textures.c src/cars.c src/present.c src/chart.c
 OBJS    = $(C_SRCS:src/%.c=$(BUILD)/%.o) $(BUILD)/sokol_impl.o
 
 all: $(TARGET)

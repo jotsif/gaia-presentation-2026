@@ -39,6 +39,8 @@ enum {
     DECAL_SINGULARITY,      // gantry
     DECAL_MOUNTAIN,         // gantry
     DECAL_TOKENS,           // billboard
+    DECAL_CITY,             // future city: welcome hologram
+    DECAL_SING_HERE,        // future city: "SINGULARITY 0 KM" gantry
     DECAL_COUNT
 };
 

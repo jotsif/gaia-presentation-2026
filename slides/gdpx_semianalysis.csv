@@ -1,0 +1,15 @@
+model,score,lab,color,cost
+Claude Opus 5.5,12.0,Anthropic,#C97D60,51.41
+Gemini 4 Carbon,10.9,Google,#5DBF6A,16.29
+GPT-6 Astra,9.6,OpenAI,#D8DCE4,53.99
+Muse Wonder Full,9.0,Meta,#4A90F0,
+Claude Fable 5.1,8.5,Anthropic,#C97D60,67.16
+GPT-6.1 Sol,8.4,OpenAI,#D8DCE4,9.80
+Claude Sonnet 5.5,8.2,Anthropic,#C97D60,45.27
+Gemini 4 Argon,7.3,Google,#5DBF6A,12.79
+Muse Wonder,6.8,Meta,#4A90F0,15.63
+DeepSeek 4.1 Flash 1017,5.4,DeepSeek,#4F5FE8,0.94
+GPT-6 Luna,5.1,OpenAI,#D8DCE4,0.92
+Grok 4.7,3.9,xAI,#8478D8,16.34
+GLM 5.3,2.7,Z.ai,#4A88F0,11.79
+Human expert,0,human,#FFA040,
