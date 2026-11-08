@@ -1,0 +1,29 @@
+model,elo,lab,color
+Claude Opus 5.5 (max),1866,Anthropic,#C97D60
+Kimi K3.1 Pro,1858,Moonshot AI,#3D82F0
+Muse Wonder Full (max),1857,Meta,#4A90F0
+Claude Sonnet 5.5 (max),1838,Anthropic,#C97D60
+Muse Wonder (max),1770,Meta,#4A90F0
+Claude Fable 5.1 (max),1763,Anthropic,#C97D60
+DeepSeek V4.1 Flash (max),1746,DeepSeek,#4F5FE8
+Gemini 4 Carbon (high),1733,Google,#5DBF6A
+Claude Opus 5 (max),1730,Anthropic,#C97D60
+Grok 4.7 (xhigh),1718,xAI,#8478D8
+MiMo-V2.6-Pro,1689,Xiaomi,#F07A30
+Qwen3.8 Max (0902),1674,Alibaba,#F08A40
+GLM-5.3 (max),1657,Z.ai,#4A88F0
+Ling 3.1 Flash 1019,1653,Ant Group,#6CB8FA
+Claude Haiku 5.5 (max),1631,Anthropic,#C97D60
+Inkling 2 Small,1630,Thinking Machines,#9A9AA6
+GPT-6.1 Sol (max),1609,OpenAI,#D8DCE4
+GPT-6 Astra (max),1584,OpenAI,#D8DCE4
+GPT-6.1 Terra (max),1476,OpenAI,#D8DCE4
+MiniMax-M3.1-Flash,1465,MiniMax,#E0507A
+Gemini 3.8 Flash (high),1445,Google,#5DBF6A
+GPT-6 Luna (max),1444,OpenAI,#D8DCE4
+Qwen3.8 27B (xhigh),1427,Alibaba,#F08A40
+Muse Spark Open (xhigh),1401,Meta,#4A90F0
+K2 Horizon 375B A23B,1365,,#5A6AF0
+Beam 1.0,1177,,#5FA060
+Nemotron 3.5 Super VL,1162,NVIDIA,#8CC83C
+Human expert,1000,human,#FFA040

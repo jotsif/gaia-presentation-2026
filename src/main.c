@@ -19,6 +19,7 @@
 #include "shaders.h"
 #include "present.h"
 #include "textfx.h"
+#include "city.h"
 
 // implemented in sokol_impl.m (Metal readback + PNG encoding)
 bool highway_save_png(sg_image img, int w, int h, bool bgra, const char* path);
@@ -31,6 +32,11 @@ typedef struct {
     float fog_color[4];
     float snap[4];
     float tint[4];
+    float sun_color[4];
+    float amb_color[4];
+    float wave[4];
+    float rise[4];
+    float misc[4];
 } vs_params_t;
 
 typedef struct {
@@ -57,6 +63,13 @@ static struct {
     sg_sampler smp_nearest, smp_linear, smp_sky_nearest, smp_sky_linear, smp_display, smp_slide;
     gpu_mesh_t terrain, road, props, decals, sky, cars, shadow, sign_quad, sign_frame, blades;
     sg_view tex_white, tex_detail, tex_road, tex_sky, tex_atlas;
+    sg_image img_sky;
+    // future city
+    struct {
+        gpu_mesh_t ground, road, deck, deck_decals, towers, trim, decals, spire, spire_trim, pods, curtain;
+        int pod_first[2], pod_count[2];
+        sg_view tex_facade, tex_ground;
+    } city;
     car_model_t car_models[CAR_NUM_TYPES];
     // low-res render target
     sg_image rt_color, rt_depth;
@@ -109,6 +122,30 @@ static struct {
     int cli_shot_frame;
     int frame_count;
 } S;
+
+// Phase two of the talk: a '@futurecity' slide (or G / --future) starts the singularity
+// wave that turns the countryside into a megacity, while the sun slowly sets.
+#define FUTURE_LEAD       650.0f    // the wave starts this far ahead of the player car (m)
+#define FUTURE_DONE_R     6500.0f   // radius at which the old world is gone everywhere
+#define FUTURE_SUN_ELEV   8.0f      // sun elevation at the end of the sunset (degrees)
+static struct {
+    bool active;
+    float t;                // seconds since the wave started
+    float sunset_time;      // seconds until golden hour
+    vec3 origin;
+    float radius;
+    float sky_timer, sky_k, sky_city;
+} FUT;
+
+// lighting environment (midday until the future phase starts)
+static struct {
+    vec3 fog, sun, amb, light_dir;
+    float fog_end, neon, windows;
+} ENV;
+
+static float future_radius(float t) {
+    return t * (30.0f + 1.5f * t);
+}
 
 static bool g_no_intro = false;              // --no-intro: skip the title screen
 static int g_next_at[16], g_num_next_at = 0;   // --next-at N: scripted "next slide" at frame N (testing)
@@ -192,6 +229,23 @@ static sg_view make_texture_from(image_t img, bool mips, const char* label) {
     sg_view v = make_texture(&img, mips, label);
     image_free(&img);
     return v;
+}
+
+// (re)creates the sky texture; the sky is re-composited while the sun sets
+static void set_sky_texture(image_t img) {
+    if (S.img_sky.id) {
+        sg_destroy_view(S.tex_sky);
+        sg_destroy_image(S.img_sky);
+    }
+    S.img_sky = sg_make_image(&(sg_image_desc){
+        .width = img.w,
+        .height = img.h,
+        .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .data = { img.px, (size_t)img.w * (size_t)img.h * sizeof(uint32_t) },
+        .label = "tex-sky",
+    });
+    S.tex_sky = sg_make_view(&(sg_view_desc){ .texture.image = S.img_sky, .label = "tex-sky" });
+    image_free(&img);
 }
 
 static void create_render_target(int w, int h) {
@@ -357,6 +411,25 @@ static void init(void) {
     S.blades = upload_mesh(&w.blades, "turbine-blades");
     world_free(&w);
 
+    city_meshes_t cm;
+    city_build(&cm);
+    S.city.ground = upload_mesh(&cm.ground, "city-ground");
+    S.city.road = upload_mesh(&cm.road, "city-road");
+    S.city.deck = upload_mesh(&cm.deck, "city-deck");
+    S.city.deck_decals = upload_mesh(&cm.deck_decals, "city-deck-decals");
+    S.city.towers = upload_mesh(&cm.towers, "city-towers");
+    S.city.trim = upload_mesh(&cm.trim, "city-trim");
+    S.city.decals = upload_mesh(&cm.decals, "city-decals");
+    S.city.spire = upload_mesh(&cm.spire, "city-spire");
+    S.city.spire_trim = upload_mesh(&cm.spire_trim, "city-spire-trim");
+    S.city.pods = upload_mesh(&cm.pods, "city-pods");
+    S.city.curtain = upload_mesh(&cm.curtain, "city-curtain");
+    for (int k = 0; k < 2; k++) {
+        S.city.pod_first[k] = cm.pod_first[k];
+        S.city.pod_count[k] = cm.pod_count[k];
+    }
+    city_free(&cm);
+
     mesh_t cars = { 0 }, shadow = { 0 };
     cars_build_models(&cars, S.car_models);
     cars_build_shadow(&shadow);
@@ -387,7 +460,9 @@ static void init(void) {
     S.tex_white = make_texture_from(tex_gen_white(), false, "tex-white");
     S.tex_detail = make_texture_from(tex_gen_detail(), true, "tex-detail");
     S.tex_road = make_texture_from(tex_gen_road(track_dash_period()), true, "tex-road");
-    S.tex_sky = make_texture_from(tex_gen_sky(), false, "tex-sky");
+    set_sky_texture(tex_gen_sky());
+    S.city.tex_facade = make_texture_from(tex_gen_facade(), true, "tex-facade");
+    S.city.tex_ground = make_texture_from(tex_gen_city_ground(), true, "tex-city-ground");
     S.tex_atlas = make_texture_from(tex_gen_atlas(), true, "tex-atlas");
 
     create_pipelines();
@@ -397,6 +472,7 @@ static void init(void) {
     }
 
     S.light_dir = sun_direction();
+    FUT.sky_k = FUT.sky_city = 0.0f;
     S.cam_mode = S.present_mode ? CAM_PRESENT : CAM_CHASE;
     S.intro = S.present_mode && !g_no_intro;
     if (S.intro) {
@@ -580,6 +656,56 @@ static void update_sign_orientation(float dt) {
 }
 
 // ---------------------------------------------------------------------------
+//  Future city phase: singularity wave + sunset
+// ---------------------------------------------------------------------------
+// starts the wave ahead of the player car; t0 > 0 starts it as if it began t0 seconds ago
+static void future_start(float sunset_time, float t0) {
+    if (FUT.active) {
+        return;
+    }
+    const car_t* hero = &S.traffic.cars[0];
+    FUT.active = true;
+    FUT.sunset_time = sunset_time > 0.0f ? sunset_time : 150.0f;
+    FUT.t = t0;
+    FUT.radius = future_radius(t0);
+    FUT.origin = track_frame(hero->s + (float)hero->dir * FUTURE_LEAD).pos;
+    FUT.sky_timer = 0.0f;
+    printf("[highway] future city: the singularity wave has started (sunset over %.0f s)\n", FUT.sunset_time);
+}
+
+static void update_future(float dt) {
+    float k = 0.0f;
+    if (FUT.active) {
+        FUT.t += dt;
+        FUT.radius = future_radius(FUT.t);
+        k = smoothstepf(0.0f, FUT.sunset_time, FUT.t);
+    }
+    float el = lerpf(SUN_ELEV_DEG, FUTURE_SUN_ELEV, k) * PI_F / 180.0f, th = SUN_U * 2.0f * PI_F;
+    ENV.light_dir = v3(cosf(th) * cosf(el), sinf(el), sinf(th) * cosf(el));
+    ENV.fog = v3_lerp(v3(FOG_R, FOG_G, FOG_B), v3(0.80f, 0.56f, 0.52f), k);
+    ENV.sun = v3_lerp(v3(1.0f, 1.0f, 1.0f), v3(1.12f, 0.72f, 0.42f), k);
+    ENV.amb = v3_lerp(v3(1.0f, 1.0f, 1.0f), v3(0.74f, 0.66f, 0.90f), k);
+    ENV.fog_end = lerpf(FOG_END, 1500.0f, k);
+    ENV.neon = 0.85f + 0.15f * k;
+    ENV.windows = lerpf(0.30f, 0.90f, k);
+    S.light_dir = ENV.light_dir;
+    if (!FUT.active) {
+        return;
+    }
+    // re-composite the sky a few times per second while it changes
+    float city = smoothstepf(1100.0f, 1700.0f, FUT.radius);
+    FUT.sky_timer -= dt;
+    if (FUT.sky_timer <= 0.0f && (fabsf(k - FUT.sky_k) > 0.002f || fabsf(city - FUT.sky_city) > 0.002f ||
+                                  (k >= 1.0f && FUT.sky_k < 1.0f) || (city >= 1.0f && FUT.sky_city < 1.0f))) {
+        sky_params_t sp = { lerpf(SUN_ELEV_DEG, FUTURE_SUN_ELEV, k), k, city, ENV.fog };
+        set_sky_texture(tex_gen_sky_ex(&sp));
+        FUT.sky_k = k;
+        FUT.sky_city = city;
+        FUT.sky_timer = 0.25f;
+    }
+}
+
+// ---------------------------------------------------------------------------
 //  Rendering
 // ---------------------------------------------------------------------------
 static vs_params_t base_params(void) {
@@ -587,8 +713,11 @@ static vs_params_t base_params(void) {
     memset(&p, 0, sizeof(p));
     p.model = m4_identity();
     p.cam_pos[0] = S.cam_eye.x; p.cam_pos[1] = S.cam_eye.y; p.cam_pos[2] = S.cam_eye.z; p.cam_pos[3] = FOG_START;
-    p.light_dir[0] = S.light_dir.x; p.light_dir[1] = S.light_dir.y; p.light_dir[2] = S.light_dir.z; p.light_dir[3] = FOG_END;
-    p.fog_color[0] = FOG_R; p.fog_color[1] = FOG_G; p.fog_color[2] = FOG_B; p.fog_color[3] = 0.0f;
+    p.light_dir[0] = S.light_dir.x; p.light_dir[1] = S.light_dir.y; p.light_dir[2] = S.light_dir.z; p.light_dir[3] = ENV.fog_end;
+    p.fog_color[0] = ENV.fog.x; p.fog_color[1] = ENV.fog.y; p.fog_color[2] = ENV.fog.z; p.fog_color[3] = 0.0f;
+    p.sun_color[0] = ENV.sun.x; p.sun_color[1] = ENV.sun.y; p.sun_color[2] = ENV.sun.z;
+    p.amb_color[0] = ENV.amb.x; p.amb_color[1] = ENV.amb.y; p.amb_color[2] = ENV.amb.z;
+    p.misc[1] = 1.0f;
     p.snap[0] = (float)S.rt_w * 0.5f;
     p.snap[1] = (float)S.rt_h * 0.5f;
     p.snap[2] = S.jitter ? 1.0f : 0.0f;
@@ -658,7 +787,7 @@ static void render_scene(void) {
 
     sg_begin_pass(&(sg_pass){
         .action = {
-            .colors[0] = { .load_action = SG_LOADACTION_CLEAR, .clear_value = { FOG_R, FOG_G, FOG_B, 1.0f } },
+            .colors[0] = { .load_action = SG_LOADACTION_CLEAR, .clear_value = { ENV.fog.x, ENV.fog.y, ENV.fog.z, 1.0f } },
             .depth = { .load_action = SG_LOADACTION_CLEAR, .clear_value = 0.0f },
         },
         .attachments = { .colors[0] = S.rt_color_att, .depth_stencil = S.rt_depth_att },
@@ -677,34 +806,89 @@ static void render_scene(void) {
         draw_mesh(&S.sky, S.tex_sky, S.bilinear ? S.smp_sky_linear : S.smp_sky_nearest, 0, S.sky.count);
     }
 
-    vs_params_t p = base_params();
-    p.mvp = vp;
+    // the old world dissolves inside the singularity wave (and is skipped once it is gone)
+    bool old_world = !FUT.active || FUT.radius < FUTURE_DONE_R;
+    if (old_world) {
+        vs_params_t p = base_params();
+        p.mvp = vp;
+        if (FUT.active) {
+            p.wave[0] = FUT.origin.x; p.wave[1] = FUT.origin.z; p.wave[2] = FUT.radius; p.wave[3] = 1.0f;
+        }
 
-    // terrain (indexed)
-    sg_apply_pipeline(S.pip_scene_idx);
-    sg_apply_uniforms(0, &SG_RANGE(p));
-    draw_mesh(&S.terrain, S.tex_detail, smp, 0, S.terrain.count);
+        // terrain (indexed)
+        sg_apply_pipeline(S.pip_scene_idx);
+        sg_apply_uniforms(0, &SG_RANGE(p));
+        draw_mesh(&S.terrain, S.tex_detail, smp, 0, S.terrain.count);
 
-    // static world
-    sg_apply_pipeline(S.pip_scene);
-    sg_apply_uniforms(0, &SG_RANGE(p));
-    draw_mesh(&S.road, S.tex_road, smp, 0, S.road.count);
-    draw_mesh(&S.props, S.tex_detail, smp, 0, S.props.count);
-    draw_mesh(&S.decals, S.tex_atlas, smp, 0, S.decals.count);
+        // static world
+        sg_apply_pipeline(S.pip_scene);
+        sg_apply_uniforms(0, &SG_RANGE(p));
+        draw_mesh(&S.road, S.tex_road, smp, 0, S.road.count);
+        draw_mesh(&S.props, S.tex_detail, smp, 0, S.props.count);
+        draw_mesh(&S.decals, S.tex_atlas, smp, 0, S.decals.count);
 
-    // wind turbine rotors (rotation axis = local +z)
-    const turbine_t* turbines;
-    int nturb = world_turbines(&turbines);
-    for (int i = 0; i < nturb; i++) {
-        const turbine_t* t = &turbines[i];
-        vec3 x = v3_norm(v3_cross(v3(0, 1, 0), t->axis)), y = v3_cross(t->axis, x);
-        float a = S.time * 1.3f + t->phase, ca = cosf(a), sa = sinf(a);
-        vec3 xr = v3_add(v3_scale(x, ca), v3_scale(y, sa)), yr = v3_sub(v3_scale(y, ca), v3_scale(x, sa));
-        vs_params_t tp = base_params();
-        tp.model = m4_basis(xr, yr, t->axis, t->hub);
-        tp.mvp = m4_mul(vp, tp.model);
-        sg_apply_uniforms(0, &SG_RANGE(tp));
-        draw_mesh(&S.blades, S.tex_detail, smp, 0, S.blades.count);
+        // wind turbine rotors (rotation axis = local +z)
+        const turbine_t* turbines;
+        int nturb = world_turbines(&turbines);
+        for (int i = 0; i < nturb; i++) {
+            const turbine_t* t = &turbines[i];
+            vec3 x = v3_norm(v3_cross(v3(0, 1, 0), t->axis)), y = v3_cross(t->axis, x);
+            float a = S.time * 1.3f + t->phase, ca = cosf(a), sa = sinf(a);
+            vec3 xr = v3_add(v3_scale(x, ca), v3_scale(y, sa)), yr = v3_sub(v3_scale(y, ca), v3_scale(x, sa));
+            vs_params_t tp = p;
+            tp.model = m4_basis(xr, yr, t->axis, t->hub);
+            tp.mvp = m4_mul(vp, tp.model);
+            sg_apply_uniforms(0, &SG_RANGE(tp));
+            draw_mesh(&S.blades, S.tex_detail, smp, 0, S.blades.count);
+        }
+    }
+
+    // the future city, revealed inside the wave; towers rise out of the ground near its front
+    if (FUT.active) {
+        vs_params_t p = base_params();
+        p.mvp = vp;
+        p.wave[0] = FUT.origin.x; p.wave[1] = FUT.origin.z; p.wave[2] = FUT.radius; p.wave[3] = 2.0f;
+        p.sun_color[3] = 1.0f;        // vertex alpha marks neon
+        p.amb_color[3] = ENV.windows; // texture alpha marks lit windows
+        p.misc[0] = ENV.neon;
+
+        sg_apply_pipeline(S.pip_scene_idx);
+        sg_apply_uniforms(0, &SG_RANGE(p));
+        draw_mesh(&S.city.ground, S.city.tex_ground, smp, 0, S.city.ground.count);
+
+        sg_apply_pipeline(S.pip_scene);
+        sg_apply_uniforms(0, &SG_RANGE(p));
+        draw_mesh(&S.city.road, S.tex_road, smp, 0, S.city.road.count);
+        draw_mesh(&S.city.deck, S.tex_detail, smp, 0, S.city.deck.count);
+        draw_mesh(&S.city.deck_decals, S.tex_atlas, smp, 0, S.city.deck_decals.count);
+
+        vs_params_t rp = p;
+        rp.rise[0] = CITY_SPIRE_TOP + 60.0f;
+        sg_apply_uniforms(0, &SG_RANGE(rp));
+        draw_mesh(&S.city.towers, S.city.tex_facade, smp, 0, S.city.towers.count);
+        draw_mesh(&S.city.trim, S.tex_detail, smp, 0, S.city.trim.count);
+        draw_mesh(&S.city.decals, S.tex_atlas, smp, 0, S.city.decals.count);
+        vec3 sp = city_spire_pos();
+        rp.rise[1] = 1.0f; rp.rise[2] = sp.x; rp.rise[3] = sp.z;
+        sg_apply_uniforms(0, &SG_RANGE(rp));
+        draw_mesh(&S.city.spire, S.city.tex_facade, smp, 0, S.city.spire.count);
+        draw_mesh(&S.city.spire_trim, S.tex_detail, smp, 0, S.city.spire_trim.count);
+
+        // flying cars in the sky lanes above the skyway
+        const city_pod_t* pods;
+        int npods = city_pods(&pods);
+        for (int i = 0; i < npods; i++) {
+            const city_pod_t* pd = &pods[i];
+            track_frame_t f = track_frame(pd->s0 + pd->speed * S.time);
+            vec3 fwd = v3_scale(f.tan, pd->speed >= 0.0f ? 1.0f : -1.0f);
+            vec3 up = v3(0, 1, 0);
+            vec3 pos = v3_mad(v3_mad(f.pos, f.right, pd->lat), up, pd->height + 0.8f * sinf(S.time * 0.9f + pd->phase));
+            vs_params_t pp = p;
+            pp.model = m4_basis(v3_norm(v3_cross(up, fwd)), up, fwd, pos);
+            pp.mvp = m4_mul(vp, pp.model);
+            sg_apply_uniforms(0, &SG_RANGE(pp));
+            draw_mesh(&S.city.pods, S.tex_white, smp, S.city.pod_first[pd->variant], S.city.pod_count[pd->variant]);
+        }
     }
 
     // blob shadows
@@ -738,6 +922,21 @@ static void render_scene(void) {
         cp.tint[0] = c->tint.x; cp.tint[1] = c->tint.y; cp.tint[2] = c->tint.z; cp.tint[3] = 1.0f;
         sg_apply_uniforms(0, &SG_RANGE(cp));
         draw_mesh(&S.cars, S.tex_white, smp, cm->first, cm->count);
+    }
+
+    // the glowing wall of the wave front (fades out once it is far away)
+    if (FUT.active && FUT.radius < 2600.0f) {
+        vs_params_t wp = base_params();
+        float hgt = 340.0f;
+        wp.model = m4_basis(v3(FUT.radius, 0, 0), v3(0, hgt, 0), v3(0, 0, FUT.radius),
+                            v3(FUT.origin.x, city_ground_y() - 20.0f, FUT.origin.z));
+        wp.mvp = m4_mul(vp, wp.model);
+        wp.fog_color[3] = 1.0f;   // unlit, no fog
+        wp.snap[2] = 0.0f;
+        wp.misc[1] = (1.0f - smoothstepf(1400.0f, 2600.0f, FUT.radius)) * smoothstepf(0.0f, 40.0f, FUT.radius);
+        sg_apply_pipeline(S.pip_shadow);
+        sg_apply_uniforms(0, &SG_RANGE(wp));
+        draw_mesh(&S.city.curtain, S.tex_white, smp, 0, S.city.curtain.count);
     }
 
     if (S.present_mode) {
@@ -977,6 +1176,10 @@ static void frame(void) {
             S.cam_mode = cam;
             S.cam_snap = true;
         }
+        float fut = present_take_future_request();
+        if (fut > 0.0f) {
+            future_start(fut, 0.0f);
+        }
     } else if (S.key_up) {
         hero->v0 = fminf(hero->v0 + 18.0f * dt, 80.0f);
     }
@@ -985,6 +1188,7 @@ static void frame(void) {
     }
 
     traffic_update(&S.traffic, dt);
+    update_future(dt);
 
     int lap = (int)(hero->odo / (double)S.traffic.L);
     if (lap > S.lap) {
@@ -1189,6 +1393,7 @@ static void event(const sapp_event* e) {
             case SAPP_KEYCODE_H: S.show_hud = !S.show_hud; break;
             case SAPP_KEYCODE_F1: S.show_help = !S.show_help; S.help_timer = 0.0f; break;
             case SAPP_KEYCODE_0: S.follow = 0; S.cam_snap = true; break;
+            case SAPP_KEYCODE_G: future_start(150.0f, 0.0f); break;
             case SAPP_KEYCODE_F12: {
                 static int shot_index = 0;
                 snprintf(S.shot_path, sizeof(S.shot_path), "highway-shot-%03d.png", ++shot_index);
@@ -1218,6 +1423,7 @@ static void print_usage(void) {
            "  --res N          render resolution (0 = 240p, 1 = 360p, 2 = 540p, 3 = 720p (default), 4 = native)\n"
            "  --car N          follow car N (0 = player)\n"
            "  --fullscreen     start in fullscreen\n"
+           "  --future [S]     start in the future city (S seconds into the transition, default 300)\n"
            "  --shot PATH      save a PNG screenshot after --shot-frame frames and quit\n"
            "  --shot-frame N   frame for --shot (default 240)\n");
 }
@@ -1225,6 +1431,7 @@ static void print_usage(void) {
 static int g_start_cam = -1, g_start_res = DEFAULT_RES_MODE, g_start_car = 0;
 static float g_start_at = -1.0f;   // --at F: start the player car at this fraction of the loop
 static bool g_fullscreen = false;
+static float g_future = -1.0f;   // --future S
 
 static void apply_cli_settings(void) {
     if (g_start_cam >= 0 && g_start_cam < CAM_NUM) {
@@ -1240,6 +1447,9 @@ static void apply_cli_settings(void) {
     if (g_start_at >= 0.0f) {
         S.traffic.cars[0].s = wrapf(g_start_at, 1.0f) * S.traffic.L;
         S.cam_snap = true;
+    }
+    if (g_future >= 0.0f) {
+        future_start(150.0f, g_future);
     }
 }
 
@@ -1264,6 +1474,10 @@ sapp_desc sokol_main(int argc, char* argv[]) {
         else if (!strcmp(a, "--fullscreen")) { g_fullscreen = true; }
         else if (!strcmp(a, "--demo")) { S.present_mode = false; }
         else if (!strcmp(a, "--no-intro")) { g_no_intro = true; }
+        else if (!strcmp(a, "--future")) {
+            g_future = 300.0f;
+            if (i + 1 < argc && argv[i + 1][0] != '-') g_future = (float)atof(argv[++i]);
+        }
         else if (!strcmp(a, "--at") && has_val) { g_start_at = (float)atof(argv[++i]); }
         else if (!strcmp(a, "--slides") && has_val) { S.slides_path = argv[++i]; }
         else if (!strcmp(a, "--next-at") && has_val) { g_next_at[g_num_next_at < 16 ? g_num_next_at++ : 15] = atoi(argv[++i]); }

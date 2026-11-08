@@ -38,6 +38,9 @@ Plain text
   the slide (e.g. a `#` title) goes above the image; the image is aspect-fitted below it.
 - `@zoom on|off` controls the close-up: while such a slide is presenting the camera moves in
   until the sign fills the screen. Image slides zoom by default, text slides don't.
+- `> TEXT` is a quotation (smaller text, word-wrapped, with a big quotation mark) and
+  `-- NAME` its right-aligned attribution.
+- Lines starting with `//` are comments (slides.txt uses them to number the slides).
 - `@camera present|chase|bumper|heli|tv` cuts to that camera when the slide arrives.
 - `@chart FILE.yaml` draws METR's time-horizon chart natively from a `benchmark_results`
   YAML file (log-scale 50% horizon vs. release date, CI bars, SOTA models highlighted,
@@ -57,8 +60,28 @@ Plain text
   frontier trends from 2024 on (ECI points per year), then lag markers showing how long after
   closed weights each open-weights frontier model reached the same score (average in the legend).
   Model ids contain spaces here, so quote them: `@label "GPT-4 (Mar 2023)" GPT-4`.
+- `@chart FILE.csv` with LMArena anchor columns (`date,top_model,top_model_rating,<model>,...`)
+  draws the **Arena Elo** chart: the top model's rating as a yellow staircase (a labelled dot
+  each time a new model takes the lead) and one line per anchor model from its release.
+  Annotation steps: the leader's linear trend (Elo/yr), then each anchor model's trend after its
+  first three months (about flat). If the anchor columns are named `<model> win %`, it draws the
+  **win rate vs. the top model** instead (50% "even match" line, ticks for new leaders); its
+  annotation step adds "start -> now" per model to the legend. Rename anchors or leaders with
+  `@label` (e.g. `@label "GPT-4 (0314)" GPT-4`, `@label gemini-2.5-pro "Gemini 2.5"`).
   `@maxlabels N` limits the number of labels (default 14; the newest frontier models and the
   biggest jumps are labelled first).
+- `@futurecity [SECONDS]` starts phase two of the talk when the slide arrives (see "Future city"
+  below); SECONDS is the length of the sunset (default 150). Going back does not undo it.
+- `@chart FILE.csv` with a `model,elo[,lab,color]` header draws a **leaderboard** as horizontal
+  bars (best first, optional `#RRGGBB` bar colours) that grow in. Annotation steps: a human-expert
+  line at Elo 1000, then each model's expected win rate against it (Elo formula, 400-point
+  scale). With a `model,score[,lab,color,cost]` header the scores are percentages and the one
+  annotation step adds the cost per task (used for SemiAnalysis GDPx).
+- `@theory step|task|horizon` draws one of three animated theory panels ("from step ability to
+  task success"): the Rasch/IRT step model p = sigma(theta - b), the O-ring task model
+  P(D) = p^D and the resulting 50% horizon D50 = ln 2 / epsilon. Each panel typesets its formulas
+  with a small LaTeX-like math renderer (Greek letters, fractions, super- and subscripts drawn as
+  pixel glyphs in `src/chart.c`), sweeps in its curves and has two annotation steps.
 - `@source TEXT` adds a small attribution line in the sign's top-right corner (Epoch AI's data
   is CC BY and needs attribution).
 - Text uses an 8x8 retro bitmap font (ASCII; common UTF-8 punctuation is converted, and
@@ -70,6 +93,7 @@ Plain text
 | Left, Up, PageUp, Backspace, right click | previous slide |
 | C | cycle cameras (present, chase, bumper, heli, TV) — every camera frames the presenting sign, and signs turn towards the camera on their turntable mast |
 | H | show camera name, F1 key help |
+| G | start the future-city phase by hand |
 
 Most presentation clickers send PageDown/PageUp or arrow keys, so they work out of the box.
 Run with `--demo` for the original free-roaming traffic demo.
@@ -92,6 +116,24 @@ Talk-themed billboards (RSI "improve yourself... recursively", "time horizon x2 
 "agents working nonstop", "fresh tokens farm shop") and gantries are drawn in `src/textures.c`.
 `--at F` starts at a given loop fraction, handy for checking a zone.
 
+## Future city (phase two)
+
+A slide with `@futurecity` sets off the singularity: a glowing wave starts ~650 m ahead of the
+car and expands (slowly at first, then faster until it has covered the whole map in under a
+minute). Inside the wave the countryside dissolves and a procedurally generated megacity
+(`src/city.c`) takes its place, with towers rising out of the ground as the front passes:
+
+- the highway becomes a neon-lit skyway on pylons with gantries ("SINGULARITY 0 KM", "GAIA CITY")
+- ~1900 towers (stepped, round, twisting, obelisks, twin towers with sky bridges), neon bands,
+  antennas and holographic ads on a flat street grid with glowing kerbs
+- flying cars in sky lanes above the road, and a 720 m spire with glowing rings in the middle
+  of the loop
+- the horizon's mountain ranges become a city skyline
+
+At the same time the sun sinks from 24 to 8 degrees over the sunset time (2.5 min by default): the
+light, fog and sky turn to golden hour and the windows and neon light up. Press G to trigger it
+by hand, or start with `--future [S]` (S seconds into the transition, default 300 = finished).
+
 ## Build and run (macOS)
 
 Requirements: Xcode Command Line Tools (`clang`, `make`).
@@ -113,6 +155,7 @@ Command-line options (`./build/highway --help`):
 | `--res N` | render resolution: 0 = 240p, 1 = 360p, 2 = 540p, 3 = 720p (default), 4 = native |
 | `--car N` | follow car N (0 = player) |
 | `--fullscreen` | start fullscreen |
+| `--future [S]` | start in the future city, S seconds into the transition (default 300) |
 | `--shot PATH` / `--shot-frame N` | save a PNG after N frames (default 240) and quit |
 | `--next-at N` | advance to the next slide at frame N (repeatable; for scripted screenshots) |
 
@@ -133,6 +176,7 @@ Command-line options (`./build/highway --help`):
 | F | nearest / bilinear texture filtering |
 | S | scanlines |
 | H / F1 | HUD / key help |
+| G | start the future-city phase |
 | F12 | save screenshot (`highway-shot-NNN.png`) |
 | Esc | quit |
 
@@ -154,10 +198,11 @@ Command-line options (`./build/highway --help`):
 | --- | --- |
 | `src/main.c` | app setup, pipelines, camera, rendering, HUD, input, CLI |
 | `src/world.c` | closed-loop track, terrain heightfield, road, barriers, lamps, bridges, signs, trees, sky |
+| `src/city.c` | future city: skyway, towers, spire, flying cars, wave-front curtain |
 | `src/cars.c` | car models + traffic simulation (IDM car-following, lane changes) |
 | `src/present.c` | slides parser, slide-to-texture rendering, sign-van choreography |
 | `src/chart.c` | METR YAML loader + animated time-horizon chart geometry |
-| `src/textures.c` | procedural textures: road, sky panorama, billboard/sign atlas, 5x7 font |
+| `src/textures.c` | procedural textures: road, sky panorama (re-composited during the sunset), billboard/sign atlas, city facades and streets, 5x7 font |
 | `src/shaders.h` | Metal shaders (scene + display) |
 | `src/mesh.c`, `src/mathx.h`, `src/noise.h` | mesh builder, vector math, value noise |
 | `src/sokol_impl.m` | sokol implementation (Objective-C) + Metal readback for screenshots |

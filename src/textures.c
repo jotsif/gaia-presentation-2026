@@ -173,63 +173,205 @@ image_t tex_gen_road(float dash_period) {
     return img;
 }
 
-image_t tex_gen_sky(void) {
-    const int W = 1024, H = 256;
-    image_t img = image_new(W, H);
-    const vec3 zenith = v3(0.15f, 0.34f, 0.80f);
-    const vec3 horizon = v3(FOG_R, FOG_G, FOG_B);
-    const vec3 sun = sun_direction();
-    static float far_m[1024], near_m[1024];
-    for (int x = 0; x < W; x++) {
-        float u = ((float)x + 0.5f) / (float)W;
+// The sky is composited from precomputed layers (clouds, mountain ranges, a city skyline)
+// so it can be re-lit cheaply while the sun sets in the future-city phase.
+#define SKY_W 1024
+#define SKY_H 256
+static struct {
+    bool ready;
+    float far_m[SKY_W], near_m[SKY_W], city_m[SKY_W];
+    float cos_th[SKY_W], sin_th[SKY_W];
+    float elev[SKY_H];
+    float* cover;    // cloud coverage per pixel
+    float* bright;   // cloud brightness per pixel
+    uint8_t* lit;    // skyline window lights
+} SK;
+
+static void sky_layers_init(void) {
+    if (SK.ready) return;
+    SK.ready = true;
+    for (int x = 0; x < SKY_W; x++) {
+        float u = ((float)x + 0.5f) / (float)SKY_W;
         float f = clampf((nz_fbm(u * 12.0f, 3.7f, 5, 12, 0, 11u) - 0.30f) / 0.42f, 0.0f, 1.0f);
-        far_m[x] = 0.6f + 6.0f * f * f;
+        SK.far_m[x] = 0.6f + 6.0f * f * f;
         float g = clampf((nz_fbm(u * 20.0f, 9.1f, 4, 20, 0, 12u) - 0.30f) / 0.45f, 0.0f, 1.0f);
-        near_m[x] = 0.3f + 2.6f * g * g;
+        SK.near_m[x] = 0.3f + 2.6f * g * g;
+        SK.cos_th[x] = cosf(u * 2.0f * PI_F);
+        SK.sin_th[x] = sinf(u * 2.0f * PI_F);
     }
-    for (int y = 0; y < H; y++) {
-        float yw = SKY_TOP - ((float)y + 0.5f) / (float)H * (SKY_TOP - SKY_BOTTOM);
-        float elev = atan2f(yw, SKY_RADIUS);
-        float ed = elev * 180.0f / PI_F;
-        for (int x = 0; x < W; x++) {
-            float u = ((float)x + 0.5f) / (float)W;
-            float th = u * 2.0f * PI_F;
-            vec3 dir = v3(cosf(th) * cosf(elev), sinf(elev), sinf(th) * cosf(elev));
-            vec3 c = horizon;
-            if (ed > 0.0f) {
-                c = v3_lerp(horizon, zenith, powf(clampf(ed / 55.0f, 0.0f, 1.0f), 0.5f));
-            }
-            // sun glow + disk
-            float cs = fmaxf(v3_dot(dir, sun), 0.0f);
-            float glow = powf(cs, 64.0f) * 0.35f + powf(cs, 8.0f) * 0.10f;
-            c = v3_add(c, v3(glow, glow * 0.85f, glow * 0.6f));
-            if (cs > cosf(2.2f * PI_F / 180.0f)) {
-                c = v3(1.0f, 0.98f, 0.88f);
-            }
-            // clouds projected onto a plane
+    // distant megacity: blocky towers of random widths, taller in a few clusters
+    for (int x = 0; x < SKY_W;) {
+        int w = 2 + (int)(nz_hash2(x, 1, 61u) * 9.0f);
+        float u = (float)x / (float)SKY_W;
+        float cluster = nz_fbm(u * 6.0f, 1.3f, 3, 6, 0, 62u);
+        float h = 0.5f + nz_hash2(x, 2, 63u) * (1.2f + 6.0f * cluster * cluster);
+        if (nz_hash2(x, 3, 64u) > 0.93f) h += 2.5f;   // the odd needle-like spire
+        for (int k = 0; k < w && x < SKY_W; k++, x++) {
+            SK.city_m[x] = h;
+        }
+    }
+    SK.cover = (float*)calloc((size_t)SKY_W * SKY_H, sizeof(float));
+    SK.bright = (float*)calloc((size_t)SKY_W * SKY_H, sizeof(float));
+    SK.lit = (uint8_t*)calloc((size_t)SKY_W * SKY_H, 1);
+    for (int y = 0; y < SKY_H; y++) {
+        float yw = SKY_TOP - ((float)y + 0.5f) / (float)SKY_H * (SKY_TOP - SKY_BOTTOM);
+        SK.elev[y] = atan2f(yw, SKY_RADIUS);
+        float ce = cosf(SK.elev[y]), se = sinf(SK.elev[y]);
+        for (int x = 0; x < SKY_W; x++) {
+            int i = y * SKY_W + x;
+            vec3 dir = v3(SK.cos_th[x] * ce, se, SK.sin_th[x] * ce);
             if (dir.y > 0.01f) {
                 float px = dir.x / dir.y, pz = dir.z / dir.y;
                 float n = nz_fbm(px * 0.9f + 3.0f, pz * 0.9f - 7.0f, 5, 0, 0, 21u);
-                float cover = smoothstepf(0.52f, 0.72f, n) * smoothstepf(0.02f, 0.15f, dir.y);
-                vec3 cc = v3_lerp(v3(0.78f, 0.80f, 0.88f), v3(1.0f, 1.0f, 1.0f), smoothstepf(0.55f, 0.8f, n));
-                cc = v3_add(cc, v3(glow * 0.5f, glow * 0.4f, glow * 0.2f));
+                SK.cover[i] = smoothstepf(0.52f, 0.72f, n) * smoothstepf(0.02f, 0.15f, dir.y);
+                SK.bright[i] = smoothstepf(0.55f, 0.8f, n);
+            }
+            SK.lit[i] = (nz_hash2(x / 2, y, 65u) > 0.80f && (y & 1) == 0) ? 1 : 0;
+        }
+    }
+}
+
+image_t tex_gen_sky_ex(const sky_params_t* sp) {
+    sky_layers_init();
+    image_t img = image_new(SKY_W, SKY_H);
+    const float k = clampf(sp->sunset, 0.0f, 1.0f), city = clampf(sp->city, 0.0f, 1.0f);
+    const vec3 fog = sp->fog;
+    const vec3 zenith = v3_lerp(v3(0.15f, 0.34f, 0.80f), v3(0.12f, 0.13f, 0.36f), k);
+    const vec3 hz_day = v3(FOG_R, FOG_G, FOG_B);
+    const vec3 hz_sun = v3(1.0f, 0.62f, 0.30f), hz_away = v3(0.60f, 0.43f, 0.60f);
+    const float el = sp->sun_elev_deg * PI_F / 180.0f;
+    const float sth = SUN_U * 2.0f * PI_F;
+    const vec3 sun = v3(cosf(sth) * cosf(el), sinf(el), sinf(sth) * cosf(el));
+    const vec3 glow_col = v3_lerp(v3(1.0f, 0.85f, 0.6f), v3(1.0f, 0.52f, 0.22f), k);
+    const vec3 disk_col = v3_lerp(v3(1.0f, 0.98f, 0.88f), v3(1.0f, 0.86f, 0.55f), k);
+    const float disk_cos = cosf((2.2f + 0.8f * k) * PI_F / 180.0f);
+    const float wide = 0.10f + 0.30f * k;
+    for (int y = 0; y < SKY_H; y++) {
+        float elev = SK.elev[y];
+        float ed = elev * 180.0f / PI_F;
+        float ce = cosf(elev), se = sinf(elev);
+        for (int x = 0; x < SKY_W; x++) {
+            int i = y * SKY_W + x;
+            vec3 dir = v3(SK.cos_th[x] * ce, se, SK.sin_th[x] * ce);
+            // horizon colour: plain fog by day, warm towards the sun and violet away from it at dusk
+            float toward = 0.5f + 0.5f * (SK.cos_th[x] * cosf(sth) + SK.sin_th[x] * sinf(sth));
+            vec3 hz = v3_lerp(hz_day, v3_lerp(hz_away, hz_sun, toward * toward), k);
+            vec3 c = fog;
+            if (ed > 0.0f) {
+                c = v3_lerp(hz, zenith, powf(clampf(ed / 55.0f, 0.0f, 1.0f), 0.5f));
+                c = v3_lerp(fog, c, smoothstepf(-0.5f, 5.0f, ed) * k + (1.0f - k));
+            }
+            // sun glow + disk
+            float cs = fmaxf(v3_dot(dir, sun), 0.0f);
+            float c2 = cs * cs, c4 = c2 * c2, c8 = c4 * c4, c16 = c8 * c8, c64 = c16 * c16 * c16 * c16;
+            float glow = c64 * 0.35f + c8 * wide;
+            c = v3_add(c, v3_scale(glow_col, glow));
+            if (cs > disk_cos) {
+                c = disk_col;
+            }
+            // clouds (lit pink and orange from below at dusk)
+            float cover = SK.cover[i];
+            if (cover > 0.0f) {
+                vec3 cc = v3_lerp(v3(0.78f, 0.80f, 0.88f), v3(1.0f, 1.0f, 1.0f), SK.bright[i]);
+                cc = v3_lerp(cc, v3_lerp(v3(0.55f, 0.40f, 0.55f), v3(1.0f, 0.62f, 0.45f), SK.bright[i] * 0.6f + toward * 0.4f), k);
+                cc = v3_add(cc, v3_scale(glow_col, glow * 0.5f));
                 c = v3_lerp(c, cc, cover * 0.9f);
             }
-            // distant mountain ranges
-            if (ed > 0.0f && (ed < far_m[x] || ed < near_m[x])) {
-                vec3 mc;
-                if (ed < near_m[x]) {
-                    mc = v3_lerp(horizon, v3(0.30f, 0.42f, 0.44f), 0.55f);
-                } else {
-                    mc = v3_lerp(horizon, v3(0.42f, 0.50f, 0.64f), 0.55f);
-                    if (far_m[x] > 3.5f && ed > far_m[x] - 0.8f) {
-                        mc = v3(0.86f, 0.89f, 0.95f);
+            // distant mountain ranges, replaced by a megacity skyline in the future-city phase
+            if (ed > 0.0f) {
+                vec3 m = c;
+                if (ed < SK.far_m[x] || ed < SK.near_m[x]) {
+                    vec3 mc;
+                    if (ed < SK.near_m[x]) {
+                        mc = v3_lerp(fog, v3_lerp(v3(0.30f, 0.42f, 0.44f), v3(0.32f, 0.24f, 0.36f), k), 0.55f);
+                    } else {
+                        mc = v3_lerp(fog, v3_lerp(v3(0.42f, 0.50f, 0.64f), v3(0.46f, 0.34f, 0.48f), k), 0.55f);
+                        if (SK.far_m[x] > 3.5f && ed > SK.far_m[x] - 0.8f) {
+                            mc = v3_lerp(v3(0.86f, 0.89f, 0.95f), v3(1.0f, 0.74f, 0.62f), k);
+                        }
                     }
+                    m = v3_lerp(fog, mc, 0.3f + 0.7f * smoothstepf(0.0f, 1.6f, ed));
                 }
-                float k = smoothstepf(0.0f, 1.6f, ed);
-                c = v3_lerp(horizon, mc, 0.3f + 0.7f * k);
+                vec3 s = c;
+                if (city > 0.0f && ed < SK.city_m[x]) {
+                    vec3 sc = v3_lerp(fog, v3_lerp(v3(0.36f, 0.42f, 0.52f), v3(0.20f, 0.17f, 0.30f), k), 0.65f);
+                    if (SK.lit[i]) {
+                        sc = v3_lerp(sc, v3(1.0f, 0.86f, 0.55f), 0.25f + 0.65f * k);
+                    }
+                    s = sc;
+                }
+                c = v3_lerp(m, s, city);
             }
-            img.px[y * W + x] = rgbv(c);
+            img.px[i] = rgbv(c);
+        }
+    }
+    return img;
+}
+
+image_t tex_gen_sky(void) {
+    sky_params_t sp = { SUN_ELEV_DEG, 0.0f, 0.0f, { FOG_R, FOG_G, FOG_B } };
+    return tex_gen_sky_ex(&sp);
+}
+
+// ---------------------------------------------------------------------------
+//  Future city: tower facades and street blocks
+// ---------------------------------------------------------------------------
+// 128x128 texels = 32 x 32 m of facade: 8 floors x 8 window bays of 4 m.
+// Lit windows have alpha 0 (they glow at dusk); everything else is opaque.
+image_t tex_gen_facade(void) {
+    const int N = 128;
+    image_t img = image_new(N, N);
+    for (int y = 0; y < N; y++) {
+        for (int x = 0; x < N; x++) {
+            int cx = x / 16, cy = y / 16, lx = x % 16, ly = y % 16;
+            float grain = (nz_hash2(x, y, 71u) - 0.5f) * 0.05f;
+            uint32_t col;
+            if (ly < 3) {
+                col = rgbf(0.66f + grain, 0.67f + grain, 0.70f + grain);          // floor slab
+            } else if (lx < 2) {
+                col = rgbf(0.52f + grain, 0.53f + grain, 0.56f + grain);          // mullion
+            } else {
+                float h = nz_hash2(cx, cy, 72u);
+                if (h > 0.70f) {   // lit window: warm or cool light
+                    vec3 l = (nz_hash2(cx, cy, 73u) > 0.3f) ? v3(1.0f, 0.82f, 0.50f) : v3(0.70f, 0.92f, 1.0f);
+                    float v = 0.85f + 0.15f * (float)(ly - 3) / 12.0f;
+                    col = rgbf(l.x * v, l.y * v, l.z * v) & 0x00FFFFFFu;
+                } else {           // glass, brighter towards the top of the pane
+                    float v = 0.30f + 0.25f * (1.0f - (float)(ly - 3) / 12.0f) + grain;
+                    col = rgbf(v * 0.75f, v * 0.88f, v * 1.1f);
+                }
+            }
+            img.px[y * N + x] = col;
+        }
+    }
+    return img;
+}
+
+// 128x128 texels = one 64 x 64 m city block: street with dashed centre line around the
+// edge, glowing kerbs (alpha 0), pavement and a tiled plaza in the middle
+image_t tex_gen_city_ground(void) {
+    const int N = 128;
+    image_t img = image_new(N, N);
+    for (int y = 0; y < N; y++) {
+        for (int x = 0; x < N; x++) {
+            int ex = x < N / 2 ? x : N - 1 - x, ey = y < N / 2 ? y : N - 1 - y;
+            int e = ex < ey ? ex : ey;    // distance (texels) from the block edge = street centre
+            float grain = (nz_hash2(x, y, 81u) - 0.5f) * 0.05f;
+            uint32_t col;
+            if (e == 0 && (((ex == 0 ? y : x) / 6) & 1)) {
+                col = rgbf(0.80f, 0.68f, 0.25f);                                   // centre line
+            } else if (e < 10) {
+                col = rgbf(0.15f + grain, 0.16f + grain, 0.20f + grain);           // asphalt
+            } else if (e == 10) {
+                col = rgbf(0.30f, 0.95f, 1.0f) & 0x00FFFFFFu;                      // glowing kerb
+            } else if (e < 18) {
+                col = rgbf(0.40f + grain, 0.41f + grain, 0.45f + grain);           // pavement
+            } else {
+                bool joint = ((x % 8) == 0) || ((y % 8) == 0);
+                float v = joint ? 0.26f : 0.33f + grain;
+                col = rgbf(v, v, v * 1.08f);                                        // plaza tiles
+            }
+            img.px[y * N + x] = col;
         }
     }
     return img;
@@ -466,6 +608,20 @@ image_t tex_gen_atlas(void) {
             thick_line(&img, 26.0f, (float)SLOT(slot) + 106.0f, 230.0f, (float)SLOT(slot) + 22.0f, 9.0f, rgbf(0.85f, 0.12f, 0.12f));
         }
     }
+    // future city: welcome hologram and the gantry that says you have arrived
+    fill_rect(&img, 0, SLOT(DECAL_CITY), 256, 128, rgbf(0.05f, 0.02f, 0.12f));
+    for (int y = 0; y < 128; y += 4) {
+        fill_rect(&img, 0, SLOT(DECAL_CITY) + y, 256, 1, rgbf(0.10f, 0.04f, 0.22f));
+    }
+    rect_outline(&img, 4, SLOT(DECAL_CITY) + 4, 248, 120, 3, rgbf(1.0f, 0.25f, 0.75f));
+    draw_text_centered(&img, 128, SLOT(DECAL_CITY) + 16, 4, rgbf(0.35f, 0.95f, 1.0f), rgbf(0.1f, 0.2f, 0.5f), "GAIA CITY");
+    draw_text_centered(&img, 128, SLOT(DECAL_CITY) + 62, 2, rgbf(1, 1, 1), 0, "POPULATION");
+    draw_text_centered(&img, 128, SLOT(DECAL_CITY) + 84, 3, rgbf(1.0f, 0.45f, 0.85f), 0, "8 BN AGENTS");
+
+    sign_frame(&img, SLOT(DECAL_SING_HERE), v3(0.30f, 0.05f, 0.42f));
+    draw_text_centered(&img, 120, SLOT(DECAL_SING_HERE) + 22, 3, white, 0, "SINGULARITY");
+    draw_text_centered(&img, 110, SLOT(DECAL_SING_HERE) + 68, 4, rgbf(0.35f, 0.95f, 1.0f), 0, "0 KM");
+    sign_arrow_up(&img, 214, SLOT(DECAL_SING_HERE) + 62, white);
     #undef SLOT
     return img;
 }

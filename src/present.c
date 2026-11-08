@@ -10,7 +10,7 @@
 
 #define MAX_SLIDES      64
 #define MAX_LINES       32
-#define LINE_LEN        160
+#define LINE_LEN        512
 #define MAX_ROWS        96
 
 // slide texture / text layout space (image slides get a 2x larger texture)
@@ -30,9 +30,10 @@
 #define SMALL_SCALE     0.18f       // folded sign size while overtaking
 #define GROW_TIME       0.9f
 
-enum { K_TITLE, K_SUB, K_H3, K_TEXT, K_BULLET, K_BLANK };
+enum { K_TITLE, K_SUB, K_H3, K_TEXT, K_BULLET, K_BLANK, K_QUOTE, K_ATTR };
 // font scales; with 2 texels per layout unit, x.5 scales still map font pixels to whole texels
-static const float KIND_SCALE[] = { 4.0f, 3.0f, 2.5f, 2.5f, 2.5f, 2.5f };
+static const float KIND_SCALE[] = { 4.0f, 3.0f, 2.5f, 2.5f, 2.5f, 2.5f, 1.5f, 1.5f };
+#define QUOTE_INDENT 46.0f   // layout units left free for the big quotation mark
 
 typedef struct {
     int kind;
@@ -44,6 +45,7 @@ typedef struct {
     int n;
     int camera;     // camera requested via '@camera', -1 = keep the current one
     int zoom;       // '@zoom on/off': 1/0, -1 = automatic (on for image slides)
+    float future;   // '@futurecity [seconds]': start the future-city phase (sunset duration), 0 = no
     char image_path[512];
     // runtime
     bool has_image;
@@ -115,6 +117,7 @@ static struct {
     int current;
     float start_timer;
     int cam_request;
+    float future_request;
     float gap;              // current presenting distance (PRESENT_GAP by default)
     char base_dir[512];     // directory of the slides file (image paths are relative to it)
     sg_pipeline blit_pip;
@@ -205,6 +208,9 @@ static bool load_slides(const char* path) {
         while (*s == ' ' || *s == '\t') {
             s++;
         }
+        if (s[0] == '/' && s[1] == '/') {
+            continue;   // '// ...' comment lines are ignored (e.g. slide numbers)
+        }
         // an indented line directly after a bullet continues that bullet
         if (s != buf && *s && sl->n > 0 && sl->lines[sl->n - 1].kind == K_BULLET && s[0] != '-' && s[0] != '*') {
             char* prev = sl->lines[sl->n - 1].text;
@@ -243,6 +249,13 @@ static bool load_slides(const char* path) {
                 add_line(sl, K_H3, "missing chart data:");
                 add_line(sl, K_TEXT, path);
             }
+        } else if (strncmp(s, "@theory ", 8) == 0) {
+            sl->chart = (chart_data_t*)calloc(1, sizeof(chart_data_t));
+            if (!chart_theory(sl->chart, s + 8)) {
+                printf("[highway] unknown @theory panel '%s' (step, task or horizon)\n", s + 8);
+                free(sl->chart);
+                sl->chart = NULL;
+            }
         } else if (strncmp(s, "@label ", 7) == 0 || strncmp(s, "@hide ", 6) == 0) {
             bool hide = (s[1] == 'h');
             char id[96];
@@ -277,6 +290,9 @@ static bool load_slides(const char* path) {
                     sp = end;
                 }
             }
+        } else if (strncmp(s, "@futurecity", 11) == 0) {
+            float secs = (float)atof(s + 11);
+            sl->future = secs > 0.0f ? secs : 150.0f;
         } else if (strncmp(s, "@zoom ", 6) == 0) {
             sl->zoom = (strcmp(s + 6, "on") == 0) ? 1 : 0;
         } else if (strncmp(s, "@camera ", 8) == 0) {
@@ -289,6 +305,8 @@ static bool load_slides(const char* path) {
         } else if (strncmp(s, "### ", 4) == 0) { add_line(sl, K_H3, s + 4); }
         else if (strncmp(s, "## ", 3) == 0)   { add_line(sl, K_SUB, s + 3); }
         else if (strncmp(s, "# ", 2) == 0)    { add_line(sl, K_TITLE, s + 2); }
+        else if (strncmp(s, "> ", 2) == 0)    { add_line(sl, K_QUOTE, s + 2); }
+        else if (strncmp(s, "-- ", 3) == 0)   { add_line(sl, K_ATTR, s + 3); }
         else if (strncmp(s, "- ", 2) == 0 || strncmp(s, "* ", 2) == 0) { add_line(sl, K_BULLET, s + 2); }
         else if (*s == 0)                     { add_line(sl, K_BLANK, ""); }
         else                                  { add_line(sl, K_TEXT, s); }
@@ -376,7 +394,8 @@ static void layout_slide(slide_t* sl) {
             rows[nr++] = (row_t){ .kind = K_BLANK, .scale = scale };
             continue;
         }
-        int cols = (int)((CANVAS_W - 2.0f * MARGIN) / (8.0f * scale));
+        float avail = CANVAS_W - 2.0f * MARGIN - (ln->kind == K_QUOTE ? QUOTE_INDENT + 6.0f : 0.0f);
+        int cols = (int)(avail / (8.0f * scale));
         int indent = (ln->kind == K_BULLET) ? 2 : 0;
         char wrapped[16][LINE_LEN];
         int nw = wrap(ln->text, cols - indent, wrapped, 16);
@@ -386,7 +405,7 @@ static void layout_slide(slide_t* sl) {
             r->scale = scale;
             r->center = (ln->kind == K_TITLE || ln->kind == K_SUB || ln->kind == K_H3) ||
                         (ln->kind == K_TEXT && !has_bullets);
-            r->bullet_first = (ln->kind == K_BULLET && w == 0);
+            r->bullet_first = ((ln->kind == K_BULLET || ln->kind == K_QUOTE) && w == 0);
             snprintf(r->text, LINE_LEN, "%s", wrapped[w]);
         }
     }
@@ -426,7 +445,18 @@ static void layout_slide(slide_t* sl) {
         if (r->center) {
             x = (CANVAS_W - (float)strlen(r->text) * cw) * 0.5f;
         }
+        if (r->kind == K_ATTR) {   // right-aligned attribution
+            x = CANVAS_W - MARGIN - (float)strlen(r->text) * cw;
+            y += 4.0f;
+        }
         switch (r->kind) {
+            case K_QUOTE:
+                if (r->bullet_first) {
+                    put_text(MARGIN - 4.0f, y - 6.0f, 5.0f, 255, 214, 64, "\"");   // big opening quotation mark
+                }
+                put_text(MARGIN + QUOTE_INDENT, y, r->scale, 240, 242, 248, r->text);
+                break;
+            case K_ATTR: put_text(x, y, r->scale, 110, 225, 255, r->text); break;
             case K_TITLE: put_text(x, y, r->scale, 255, 214, 64, r->text); break;
             case K_SUB:   put_text(x, y, r->scale, 255, 255, 255, r->text); break;
             case K_H3:    put_text(x, y, r->scale, 110, 225, 255, r->text); break;
@@ -733,6 +763,15 @@ static void show_slide(traffic_t* t, int idx, bool from_back) {
     if (P.slides[idx].camera >= 0) {
         P.cam_request = P.slides[idx].camera;
     }
+    if (P.slides[idx].future > 0.0f && !from_back) {
+        P.future_request = P.slides[idx].future;
+    }
+}
+
+float present_take_future_request(void) {
+    float f = P.future_request;
+    P.future_request = 0.0f;
+    return f;
 }
 
 int present_take_camera_request(void) {
