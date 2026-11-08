@@ -1,0 +1,12 @@
+Model version,mean_score,Best score (across scorers),Release date,Organization,Country,Training compute (FLOP),Training compute notes,stderr,Log viewer,Logs,Started at,id
+gpt-6-sol_max,0.05,0.05,2026-09-22,OpenAI,United States of America,,,0.028374015326751195,,,2026-11-05T15:14:53.647Z,steambench-sts1-a20h-831fe00153e0f0b1
+claude-fable-5-1_max,0.0,0.0,2026-09-01,Anthropic,United States of America,,,0.0,,,2026-11-05T15:14:53.017Z,steambench-sts1-a20h-2057a494867d184c
+claude-sonnet-5-5_max,0.0,0.0,2026-09-28,Anthropic,United States of America,,,0.0,,,2026-11-05T15:14:37.615Z,steambench-sts1-a20h-e8f930bf4d4f1a14
+gpt-6-luna_max,0.0,0.0,2026-09-22,OpenAI,United States of America,,,0.0,,,2026-11-05T15:14:35.795Z,steambench-sts1-a20h-f7325d71b8b16f57
+claude-opus-5-5_max,0.05,0.05,2026-09-22,Anthropic,United States of America,,,0.028374015326751195,,,2026-11-04T19:04:14.742Z,steambench-sts1-a20h-789f946c67a789f5
+gpt-6.1-sol_max,0.18333333333333332,0.18333333333333332,2026-09-29,OpenAI,United States of America,,,0.05037523978531015,,,2026-11-04T18:36:01.058Z,steambench-sts1-a20h-e795fd781f73bd66
+gpt-6-astra_max,0.3333333333333333,0.3333333333333333,2026-09-03,OpenAI,United States of America,9.4e+26,"per OpenAI and affiliates (e.g. Nvidia), 6 Astra was trained on at least 100,000 GB200s in Abilene, Texas (so 100,000 in ""Hardware quantity"" is a lower bound/underestimate).
+
+This suggests around 9e26 FLOP (corresponding to ~100k GB200s over 90 days at 25% FP8 MFU). See more detailed estimate in this notebook, yielding a CI of ~[5e26, 2e27] FLOP.
+https://colab.research.google.com/drive/1DRlugIQs-_zoV66AJT1gQg6I1-NX7NqN ",0.06137164119322156,,,2026-11-04T18:35:57.934Z,steambench-sts1-a20h-cd6cd8bb290a7ae3
+gpt-6.1-terra_max,0.1,0.1,2026-10-26,OpenAI,United States of America,,,0.039056673294247155,,,2026-11-04T18:35:54.875Z,steambench-sts1-a20h-263bd0e64b156075

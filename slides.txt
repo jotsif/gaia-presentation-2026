@@ -1,0 +1,31 @@
+# METR
+## task-Completion
+## Time Horizons of
+## Frontier AI Models
+---
+@image slides/metr-time-horizons.png
+---
+### 50% time horizon
+@chart slides/metr-benchmark-results-1-1.yaml
+@label davinci_002 GPT-3
+@label gpt_3_5_turbo_instruct GPT-3.5
+@label gpt_4_1106_inspect GPT-4 Turbo
+@label claude_3_5_sonnet_20240620_inspect Sonnet 3.5
+@label claude_3_5_sonnet_20241022_inspect Sonnet 3.5 (new)
+@label claude_3_7_sonnet_inspect Sonnet 3.7
+@label o1_preview o1-preview
+@label claude_opus_4_5_inspect Opus 4.5
+@label claude_opus_4_6_inspect Opus 4.6
+@label claude_mythos_preview_early_inspect Mythos Preview
+---
+# Slide 4
+- Placeholder slide
+- Edit slides.txt to
+  write your talk
+---
+@camera heli
+# Slide 5
+### Seen from the chopper
+- "@camera heli" cuts to
+  that camera when the
+  slide arrives
