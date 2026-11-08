@@ -51,8 +51,9 @@ typedef struct {
     sg_image img;
     sg_view img_view;
     float img_rect[4];  // x0, y0, x1, y1 in layout units (image or chart area)
-    chart_data_t* chart;    // '@chart file.yaml'
+    chart_data_t* chart;    // '@chart file.yaml|file.csv'
     chart_anim_t anim;
+    char source[LINE_LEN];  // '@source ...': small attribution line in the top-right corner
 } slide_t;
 
 #define CHART_MAX_VERTS (1 << 16)
@@ -233,7 +234,7 @@ static bool load_slides(const char* path) {
             else if (cp[0] == '~' && getenv("HOME")) snprintf(path, sizeof(path), "%s%s", getenv("HOME"), cp + 1);
             else snprintf(path, sizeof(path), "%s%s", P.base_dir, cp);
             sl->chart = (chart_data_t*)calloc(1, sizeof(chart_data_t));
-            if (chart_load_yaml(sl->chart, path)) {
+            if (chart_load(sl->chart, path)) {
                 printf("[highway] chart: %d models from %s\n", sl->chart->n, path);
             } else {
                 printf("[highway] could not load chart data %s\n", path);
@@ -246,13 +247,26 @@ static bool load_slides(const char* path) {
             bool hide = (s[1] == 'h');
             char id[96];
             const char* rest = s + (hide ? 6 : 7);
+            // the model id is either one word or "a quoted name with spaces"
             int n_id = 0;
-            while (rest[n_id] && rest[n_id] != ' ' && n_id < 95) n_id++;
-            snprintf(id, sizeof(id), "%.*s", n_id, rest);
-            const char* label = rest + n_id;
+            const char* label;
+            if (rest[0] == '"') {
+                rest++;
+                while (rest[n_id] && rest[n_id] != '"' && n_id < 95) n_id++;
+                snprintf(id, sizeof(id), "%.*s", n_id, rest);
+                label = rest + n_id + (rest[n_id] == '"' ? 1 : 0);
+            } else {
+                while (rest[n_id] && rest[n_id] != ' ' && n_id < 95) n_id++;
+                snprintf(id, sizeof(id), "%.*s", n_id, rest);
+                label = rest + n_id;
+            }
             while (*label == ' ') label++;
             bool ok = sl->chart && (hide ? chart_hide(sl->chart, id) : chart_set_label(sl->chart, id, label));
             if (!ok) printf("[highway] %s: unknown model '%s' (put it after @chart)\n", hide ? "@hide" : "@label", id);
+        } else if (strncmp(s, "@source ", 8) == 0) {
+            sanitize(s + 8, sl->source, sizeof(sl->source));
+        } else if (strncmp(s, "@maxlabels ", 11) == 0) {
+            if (sl->chart) sl->chart->max_labels = atoi(s + 11);
         } else if (strncmp(s, "@steps ", 7) == 0) {
             if (sl->chart) {
                 const char* sp = s + 7;
@@ -425,6 +439,10 @@ static void layout_slide(slide_t* sl) {
             default:      put_text(x, y, r->scale, 225, 230, 240, r->text); break;
         }
         y += 8.0f * r->scale * 1.35f;
+    }
+    if (sl->source[0]) {
+        float s = 0.75f;
+        put_text(CANVAS_W - 6.0f - (float)strlen(sl->source) * 8.0f * s, 2.0f, s, 150, 165, 210, sl->source);
     }
 }
 
@@ -669,7 +687,7 @@ static float ease_out_back(float x) {
 
 static void show_slide(traffic_t* t, int idx, bool from_back) {
     if (P.slides[idx].chart) {
-        chart_anim_reset(&P.slides[idx].anim);
+        chart_anim_reset(&P.slides[idx].anim, P.slides[idx].chart);
         if (from_back) {   // returning to a chart: show it completed
             P.slides[idx].anim.step = chart_num_steps(P.slides[idx].chart) - 1;
             chart_anim_snap(&P.slides[idx].anim, P.slides[idx].chart);

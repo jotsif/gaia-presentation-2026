@@ -55,7 +55,7 @@ static struct {
     // pipelines & resources
     sg_pipeline pip_scene, pip_scene_idx, pip_sky, pip_shadow, pip_display, pip_sign_top;
     sg_sampler smp_nearest, smp_linear, smp_sky_nearest, smp_sky_linear, smp_display, smp_slide;
-    gpu_mesh_t terrain, road, props, decals, sky, cars, shadow, sign_quad, sign_frame;
+    gpu_mesh_t terrain, road, props, decals, sky, cars, shadow, sign_quad, sign_frame, blades;
     sg_view tex_white, tex_detail, tex_road, tex_sky, tex_atlas;
     car_model_t car_models[CAR_NUM_TYPES];
     // low-res render target
@@ -354,6 +354,7 @@ static void init(void) {
     S.props = upload_mesh(&w.props, "props");
     S.decals = upload_mesh(&w.decals, "decals");
     S.sky = upload_mesh(&w.sky, "sky");
+    S.blades = upload_mesh(&w.blades, "turbine-blades");
     world_free(&w);
 
     mesh_t cars = { 0 }, shadow = { 0 };
@@ -690,6 +691,21 @@ static void render_scene(void) {
     draw_mesh(&S.road, S.tex_road, smp, 0, S.road.count);
     draw_mesh(&S.props, S.tex_detail, smp, 0, S.props.count);
     draw_mesh(&S.decals, S.tex_atlas, smp, 0, S.decals.count);
+
+    // wind turbine rotors (rotation axis = local +z)
+    const turbine_t* turbines;
+    int nturb = world_turbines(&turbines);
+    for (int i = 0; i < nturb; i++) {
+        const turbine_t* t = &turbines[i];
+        vec3 x = v3_norm(v3_cross(v3(0, 1, 0), t->axis)), y = v3_cross(t->axis, x);
+        float a = S.time * 1.3f + t->phase, ca = cosf(a), sa = sinf(a);
+        vec3 xr = v3_add(v3_scale(x, ca), v3_scale(y, sa)), yr = v3_sub(v3_scale(y, ca), v3_scale(x, sa));
+        vs_params_t tp = base_params();
+        tp.model = m4_basis(xr, yr, t->axis, t->hub);
+        tp.mvp = m4_mul(vp, tp.model);
+        sg_apply_uniforms(0, &SG_RANGE(tp));
+        draw_mesh(&S.blades, S.tex_detail, smp, 0, S.blades.count);
+    }
 
     // blob shadows
     sg_apply_pipeline(S.pip_shadow);
@@ -1196,6 +1212,8 @@ static void print_usage(void) {
            "  --slides PATH    slides file (default: slides.txt)\n"
            "  --demo           free-roaming demo with traffic instead of the presentation\n"
            "  --no-intro       skip the title screen\n"
+           "  --at F           start at fraction F of the loop (0.2 forest, 0.36 village, 0.58 mountain,\n"
+           "                   0.8 GPU campus, 0.93 farmland)\n"
            "  --cam N          start camera (0 present, 1 chase, 2 bumper, 3 heli, 4 tv)\n"
            "  --res N          render resolution (0 = 240p, 1 = 360p, 2 = 540p, 3 = 720p (default), 4 = native)\n"
            "  --car N          follow car N (0 = player)\n"
@@ -1205,6 +1223,7 @@ static void print_usage(void) {
 }
 
 static int g_start_cam = -1, g_start_res = DEFAULT_RES_MODE, g_start_car = 0;
+static float g_start_at = -1.0f;   // --at F: start the player car at this fraction of the loop
 static bool g_fullscreen = false;
 
 static void apply_cli_settings(void) {
@@ -1217,6 +1236,10 @@ static void apply_cli_settings(void) {
     }
     if (g_start_car >= 0 && g_start_car < S.traffic.num) {
         S.follow = g_start_car;
+    }
+    if (g_start_at >= 0.0f) {
+        S.traffic.cars[0].s = wrapf(g_start_at, 1.0f) * S.traffic.L;
+        S.cam_snap = true;
     }
 }
 
@@ -1241,6 +1264,7 @@ sapp_desc sokol_main(int argc, char* argv[]) {
         else if (!strcmp(a, "--fullscreen")) { g_fullscreen = true; }
         else if (!strcmp(a, "--demo")) { S.present_mode = false; }
         else if (!strcmp(a, "--no-intro")) { g_no_intro = true; }
+        else if (!strcmp(a, "--at") && has_val) { g_start_at = (float)atof(argv[++i]); }
         else if (!strcmp(a, "--slides") && has_val) { S.slides_path = argv[++i]; }
         else if (!strcmp(a, "--next-at") && has_val) { g_next_at[g_num_next_at < 16 ? g_num_next_at++ : 15] = atoi(argv[++i]); }
         else if (!strcmp(a, "--help") || !strcmp(a, "-h")) { print_usage(); exit(0); }

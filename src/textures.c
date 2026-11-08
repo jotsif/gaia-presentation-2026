@@ -275,24 +275,6 @@ static void ad_sokol(image_t* img, int oy) {
     draw_text_centered(img, 128, oy + 10, 5, rgbf(0.65f, 1.0f, 1.0f), rgbf(0.9f, 0.1f, 0.6f), "SOKOL");
 }
 
-static void ad_cola(image_t* img, int oy) {
-    for (int y = 0; y < 128; y++) {
-        for (int x = 0; x < 256; x++) {
-            float band = 64.0f + 6.0f * sinf((float)x / 256.0f * 2.0f * PI_F * 1.5f);
-            vec3 c = v3(0.80f, 0.07f, 0.10f);
-            if (fabsf((float)y - band) < 8.0f) {
-                c = v3(1, 1, 1);
-            }
-            if (fabsf((float)y - band) < 2.0f) {
-                c = v3(0.80f, 0.07f, 0.10f);
-            }
-            put(img, x, oy + y, rgbv(c));
-        }
-    }
-    draw_text_centered(img, 128, oy + 9, 5, rgbf(1, 1, 1), rgbf(0.35f, 0.0f, 0.0f), "TURBO");
-    draw_text_centered(img, 128, oy + 88, 4, rgbf(1.0f, 0.86f, 0.1f), rgbf(0.35f, 0.0f, 0.0f), "COLA");
-}
-
 static void ad_gaia(image_t* img, int oy) {
     for (int y = 0; y < 128; y++) {
         for (int x = 0; x < 256; x++) {
@@ -315,17 +297,105 @@ static void ad_gaia(image_t* img, int oy) {
     draw_text(img, 120, oy + 76, 4, rgbf(1.0f, 0.65f, 0.15f), "2026");
 }
 
-static void ad_metal(image_t* img, int oy) {
-    fill_rect(img, 0, oy, 256, 128, rgbf(1.0f, 0.82f, 0.10f));
-    for (int x = 0; x < 256; x += 12) {
-        for (int r = 0; r < 2; r++) {
-            uint32_t c = (((x / 12) + r) & 1) ? rgbf(0.05f, 0.05f, 0.05f) : rgbf(1, 1, 1);
-            fill_rect(img, x, oy + r * 6, 12, 6, c);
-            fill_rect(img, x, oy + 116 + r * 6, 12, 6, c);
+static void thick_line(image_t* img, float x0, float y0, float x1, float y1, float w, uint32_t col) {
+    float len = sqrtf((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+    for (float t = 0.0f; t <= len; t += 0.5f) {
+        float x = x0 + (x1 - x0) * t / len, y = y0 + (y1 - y0) * t / len;
+        fill_rect(img, (int)(x - w * 0.5f), (int)(y - w * 0.5f), (int)w, (int)w, col);
+    }
+}
+
+static void fill_circle(image_t* img, int cx, int cy, int r, uint32_t col) {
+    for (int y = -r; y <= r; y++) {
+        for (int x = -r; x <= r; x++) {
+            if (x * x + y * y <= r * r) put(img, cx + x, cy + y, col);
         }
     }
-    draw_text_centered(img, 128, oy + 22, 2, rgbf(0.05f, 0.05f, 0.05f), 0, "FAST LANE");
-    draw_text_centered(img, 128, oy + 50, 6, rgbf(0.05f, 0.05f, 0.05f), rgbf(0.8f, 0.5f, 0.0f), "METAL");
+}
+
+static void rect_outline(image_t* img, int x, int y, int w, int h, int t, uint32_t col) {
+    fill_rect(img, x, y, w, t, col);
+    fill_rect(img, x, y + h - t, w, t, col);
+    fill_rect(img, x, y, t, h, col);
+    fill_rect(img, x + w - t, y, t, h, col);
+}
+
+// "RSI - improve yourself ... recursively" with nested frames
+static void ad_rsi(image_t* img, int oy) {
+    for (int y = 0; y < 128; y++) {
+        uint32_t c = rgbv(v3_lerp(v3(0.18f, 0.04f, 0.34f), v3(0.55f, 0.10f, 0.45f), (float)y / 127.0f));
+        fill_rect(img, 0, oy + y, 256, 1, c);
+    }
+    float w = 250.0f, h = 122.0f;
+    for (int k = 0; k < 9; k++) {
+        uint32_t c = (k & 1) ? rgbf(0.95f, 0.35f, 0.75f) : rgbf(0.35f, 0.85f, 1.0f);
+        rect_outline(img, (int)(128.0f - w * 0.5f), oy + (int)(64.0f - h * 0.5f), (int)w, (int)h, 1, c);
+        w *= 0.82f; h *= 0.82f;
+    }
+    draw_text_centered(img, 128, oy + 6, 6, rgbf(1, 1, 1), rgbf(0.3f, 0.0f, 0.3f), "RSI");
+    draw_text_centered(img, 128, oy + 60, 2, rgbf(1, 1, 1), rgbf(0.2f, 0.0f, 0.2f), "IMPROVE YOURSELF");
+    draw_text_centered(img, 128, oy + 84, 3, rgbf(1.0f, 0.86f, 0.25f), rgbf(0.3f, 0.0f, 0.2f), "RECURSIVELY");
+}
+
+// "time horizon - x2 every 4 months" with an exponential curve
+static void ad_horizon(image_t* img, int oy) {
+    fill_rect(img, 0, oy, 256, 128, rgbf(0.03f, 0.06f, 0.18f));
+    for (int x = 16; x < 256; x += 24) fill_rect(img, x, oy + 34, 1, 70, rgbf(0.12f, 0.20f, 0.42f));
+    for (int y = 40; y < 104; y += 16) fill_rect(img, 16, oy + y, 224, 1, rgbf(0.12f, 0.20f, 0.42f));
+    float px = -1, py = -1;
+    for (int x = 18; x <= 238; x++) {
+        float t = (float)(x - 18) / 220.0f;
+        float y = 100.0f - 62.0f * (expf(3.2f * t) - 1.0f) / (expf(3.2f) - 1.0f);
+        if (px >= 0) thick_line(img, px, (float)oy + py, (float)x, (float)oy + y, 3.0f, rgbf(0.30f, 0.95f, 0.40f));
+        px = (float)x; py = y;
+        if ((x - 18) % 36 == 0) fill_rect(img, x - 3, oy + (int)y - 3, 7, 7, rgbf(1.0f, 0.86f, 0.25f));
+    }
+    draw_text_centered(img, 128, oy + 8, 3, rgbf(1, 1, 1), rgbf(0, 0, 0), "TIME HORIZON");
+    draw_text_centered(img, 128, oy + 110, 2, rgbf(0.6f, 1.0f, 0.6f), 0, "X2 EVERY 4 MONTHS");
+}
+
+// "agents - working nonstop" with a little robot
+static void ad_agents(image_t* img, int oy) {
+    fill_rect(img, 0, oy, 256, 128, rgbf(0.95f, 0.55f, 0.10f));
+    fill_rect(img, 0, oy + 118, 256, 10, rgbf(0.15f, 0.10f, 0.08f));
+    fill_rect(img, 40, oy + 16, 4, 12, rgbf(0.3f, 0.3f, 0.35f));      // antenna
+    fill_circle(img, 42, oy + 14, 4, rgbf(1.0f, 0.2f, 0.2f));
+    fill_rect(img, 14, oy + 28, 58, 50, rgbf(0.78f, 0.80f, 0.85f));   // head
+    fill_rect(img, 24, oy + 40, 12, 12, rgbf(0.2f, 0.9f, 1.0f));      // eyes
+    fill_rect(img, 50, oy + 40, 12, 12, rgbf(0.2f, 0.9f, 1.0f));
+    fill_rect(img, 26, oy + 62, 34, 6, rgbf(0.25f, 0.25f, 0.3f));     // mouth
+    fill_rect(img, 22, oy + 80, 42, 30, rgbf(0.60f, 0.62f, 0.68f));   // body
+    draw_text(img, 90, oy + 18, 4, rgbf(0.08f, 0.05f, 0.03f), "AGENTS");
+    draw_text(img, 92, oy + 60, 3, rgbf(1, 1, 1), "WORKING");
+    draw_text(img, 92, oy + 88, 3, rgbf(1, 1, 1), "NONSTOP");
+}
+
+// "fresh tokens - farm shop" over a little field scene
+static void ad_tokens(image_t* img, int oy) {
+    for (int y = 0; y < 128; y++) {
+        vec3 c = (y < 64) ? v3_lerp(v3(0.45f, 0.70f, 0.95f), v3(0.75f, 0.88f, 1.0f), (float)y / 64.0f)
+                          : ((y / 6) % 2 ? v3(0.35f, 0.62f, 0.22f) : v3(0.30f, 0.55f, 0.18f));
+        fill_rect(img, 0, oy + y, 256, 1, rgbv(c));
+    }
+    for (int i = 0; i < 5; i++) {
+        int cx = 48 + i * 40;
+        fill_circle(img, cx, oy + 72, 13, rgbf(0.55f, 0.40f, 0.05f));
+        fill_circle(img, cx, oy + 71, 12, rgbf(1.0f, 0.82f, 0.20f));
+        draw_text(img, cx - 4, oy + 64, 2, rgbf(0.55f, 0.40f, 0.05f), "T");
+    }
+    draw_text_centered(img, 128, oy + 12, 3, rgbf(1, 1, 1), rgbf(0.1f, 0.25f, 0.1f), "FRESH TOKENS");
+    draw_text_centered(img, 128, oy + 100, 2, rgbf(1.0f, 0.9f, 0.3f), rgbf(0.1f, 0.2f, 0.05f), "FARM SHOP 1 KM");
+}
+
+static void campus_wall(image_t* img, int oy) {
+    fill_rect(img, 0, oy, 256, 128, rgbf(0.12f, 0.13f, 0.17f));
+    for (int y = 6; y < 128; y += 8) {
+        for (int x = 6; x < 256; x += 8) {
+            if (nz_hash2(x, y, 3u) > 0.55f) fill_rect(img, x, oy + y, 2, 2, rgbf(0.15f, 0.55f, 0.25f));
+        }
+    }
+    draw_text_centered(img, 128, oy + 22, 4, rgbf(0.35f, 0.92f, 1.0f), rgbf(0, 0, 0), "GPU CAMPUS");
+    draw_text_centered(img, 128, oy + 80, 2, rgbf(1, 1, 1), 0, "COMPUTE INSIDE");
 }
 
 static void sign_frame(image_t* img, int oy, vec3 bg) {
@@ -347,23 +417,55 @@ static void sign_arrow_up(image_t* img, int cx, int top, uint32_t col) {
 image_t tex_gen_atlas(void) {
     image_t img = image_new(256, 128 * ATLAS_SLOTS);
     fill_rect(&img, 0, 0, 256, 128 * ATLAS_SLOTS, rgbf(0.5f, 0.5f, 0.5f));
-    ad_sokol(&img, 0 * 128);
-    ad_cola(&img, 1 * 128);
-    ad_gaia(&img, 2 * 128);
-    ad_metal(&img, 3 * 128);
-
     const uint32_t white = rgbf(0.96f, 0.96f, 0.96f);
-    sign_frame(&img, 4 * 128, v3(0.0f, 0.42f, 0.22f));
-    draw_text_centered(&img, 128, 4 * 128 + 22, 4, white, 0, "GAIA CITY");
-    draw_text(&img, 40, 4 * 128 + 76, 3, white, "EXIT 26");
-    sign_arrow_up(&img, 200, 4 * 128 + 66, white);
+    const vec3 green = v3(0.0f, 0.42f, 0.22f), blue = v3(0.07f, 0.26f, 0.62f);
+    #define SLOT(k) ((k) * 128)
 
-    sign_frame(&img, 5 * 128, v3(0.0f, 0.42f, 0.22f));
-    draw_text_centered(&img, 128, 5 * 128 + 24, 3, white, 0, "SOKOL BEACH");
-    draw_text_centered(&img, 128, 5 * 128 + 68, 4, white, 0, "12 KM");
+    ad_sokol(&img, SLOT(DECAL_SOKOL));
+    ad_rsi(&img, SLOT(DECAL_RSI));
+    ad_gaia(&img, SLOT(DECAL_GAIA));
+    ad_horizon(&img, SLOT(DECAL_HORIZON));
+    ad_agents(&img, SLOT(DECAL_AGENTS));
+    ad_tokens(&img, SLOT(DECAL_TOKENS));
+    campus_wall(&img, SLOT(DECAL_CAMPUS_WALL));
 
-    sign_frame(&img, 6 * 128, v3(0.05f, 0.25f, 0.65f));
-    draw_text_centered(&img, 128, 6 * 128 + 20, 4, white, 0, "SERVICE");
-    draw_text_centered(&img, 128, 6 * 128 + 74, 3, white, 0, "AREA 3 KM");
+    sign_frame(&img, SLOT(DECAL_EXIT_GAIABY), green);
+    draw_text_centered(&img, 128, SLOT(DECAL_EXIT_GAIABY) + 18, 5, white, 0, "GAIABY");
+    draw_text(&img, 40, SLOT(DECAL_EXIT_GAIABY) + 78, 3, white, "EXIT 26");
+    sign_arrow_up(&img, 200, SLOT(DECAL_EXIT_GAIABY) + 66, white);
+
+    sign_frame(&img, SLOT(DECAL_CAMPUS_EXIT), green);
+    draw_text_centered(&img, 128, SLOT(DECAL_CAMPUS_EXIT) + 24, 3, white, 0, "GPU CAMPUS");
+    draw_text_centered(&img, 128, SLOT(DECAL_CAMPUS_EXIT) + 70, 3, white, 0, "NEXT EXIT");
+
+    sign_frame(&img, SLOT(DECAL_SERVICE), v3(0.05f, 0.25f, 0.65f));
+    draw_text_centered(&img, 128, SLOT(DECAL_SERVICE) + 20, 4, white, 0, "SERVICE");
+    draw_text_centered(&img, 128, SLOT(DECAL_SERVICE) + 74, 3, white, 0, "AREA 3 KM");
+
+    sign_frame(&img, SLOT(DECAL_SINGULARITY), green);
+    draw_text_centered(&img, 120, SLOT(DECAL_SINGULARITY) + 22, 3, white, 0, "SINGULARITY");
+    draw_text_centered(&img, 110, SLOT(DECAL_SINGULARITY) + 68, 4, white, 0, "42 KM");
+    sign_arrow_up(&img, 214, SLOT(DECAL_SINGULARITY) + 62, white);
+
+    sign_frame(&img, SLOT(DECAL_MOUNTAIN), v3(0.42f, 0.25f, 0.10f));
+    draw_text_centered(&img, 128, SLOT(DECAL_MOUNTAIN) + 14, 3, white, 0, "MOUNTAIN PASS");
+    for (int y = 0; y < 50; y++) {   // two little peaks with snow caps
+        int oy = SLOT(DECAL_MOUNTAIN) + 60 + y;
+        fill_rect(&img, 60 - y, oy, 2 * y, 1, y < 12 ? white : rgbf(0.75f, 0.65f, 0.50f));
+        if (y > 14) fill_rect(&img, 100 - (y - 14), oy, 2 * (y - 14), 1, y < 24 ? white : rgbf(0.65f, 0.55f, 0.42f));
+    }
+    draw_text(&img, 132, SLOT(DECAL_MOUNTAIN) + 72, 2, white, "SNOW");
+    draw_text(&img, 132, SLOT(DECAL_MOUNTAIN) + 92, 2, white, "AHEAD");
+
+    for (int k = 0; k < 2; k++) {     // Swedish-style blue town sign; the exit version is crossed out
+        int slot = (k == 0) ? DECAL_TOWN : DECAL_TOWN_END;
+        fill_rect(&img, 0, SLOT(slot), 256, 128, rgbv(blue));
+        rect_outline(&img, 6, SLOT(slot) + 6, 244, 116, 5, white);
+        draw_text_centered(&img, 128, SLOT(slot) + 46, 5, white, 0, "GAIABY");
+        if (k == 1) {
+            thick_line(&img, 26.0f, (float)SLOT(slot) + 106.0f, 230.0f, (float)SLOT(slot) + 22.0f, 9.0f, rgbf(0.85f, 0.12f, 0.12f));
+        }
+    }
+    #undef SLOT
     return img;
 }
