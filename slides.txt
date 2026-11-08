@@ -17,6 +17,19 @@
 @label claude_opus_4_5_inspect Opus 4.5
 @label claude_opus_4_6_inspect Opus 4.6
 @label claude_mythos_preview_early_inspect Mythos Preview
+@source Data: METR
+---
+### ECI (Epoch AI)
+@chart slides/benchmark_data/epoch_capabilities_index/eci_scores.csv
+@source Data: Epoch AI (CC BY)
+@label "GPT-4 (Mar 2023)" GPT-4
+@label "GPT-4 Turbo (Nov 2023)" GPT-4 Turbo
+@label "GPT-4o (May 2024)" GPT-4o
+@label "Gemini 2.5 Pro (Mar 2025)" Gemini 2.5 Pro
+@label "DeepSeek-R1 (May 2025)" R1-0528
+@label "Kimi K2 (Jul 2025)" Kimi K2
+@label "Qwen3-235B-A22B-Thinking (Jul 2025)" Qwen3 235B
+@label "DeepSeek V4.1 Flash 1017" DeepSeek V4.1
 ---
 # Slide 4
 - Placeholder slide

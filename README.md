@@ -51,6 +51,16 @@ Plain text
 
   Labels are placed automatically and skipped where they would overlap; shorter names fit better.
   Chart slides zoom in like image slides.
+- `@chart FILE.csv` draws the **Epoch Capabilities Index** from Epoch AI's `eci_scores.csv`:
+  ECI vs. release date, closed-weights (orange) and open-weights (cyan) models, with each
+  group's frontier as a staircase that climbs during the sweep. Annotation steps: linear
+  frontier trends from 2024 on (ECI points per year), then lag markers showing how long after
+  closed weights each open-weights frontier model reached the same score (average in the legend).
+  Model ids contain spaces here, so quote them: `@label "GPT-4 (Mar 2023)" GPT-4`.
+  `@maxlabels N` limits the number of labels (default 14; the newest frontier models and the
+  biggest jumps are labelled first).
+- `@source TEXT` adds a small attribution line in the sign's top-right corner (Epoch AI's data
+  is CC BY and needs attribution).
 - Text uses an 8x8 retro bitmap font (ASCII; common UTF-8 punctuation is converted, and
   å ä ö Å Ä Ö ü é are composed from a base letter plus dots/accents).
 
@@ -63,6 +73,24 @@ Plain text
 
 Most presentation clickers send PageDown/PageUp or arrow keys, so they work out of the box.
 Run with `--demo` for the original free-roaming traffic demo.
+
+## Scenery
+
+One lap of the 5.1 km loop (~2.5 min at presentation speed) passes through zones that blend
+into each other, all generated procedurally in `src/world.c` (zone ranges in `ZONES[]`):
+
+| loop position | zone |
+| --- | --- |
+| 0.00 - 0.12 | countryside, overpass, SOKOL / GAIA 2026 billboards, "SINGULARITY 42 KM" gantry |
+| 0.12 - 0.29 | dense pine forest, second overpass |
+| 0.31 - 0.40 | village of Gaiaby: falu-red / yellow / white houses, church, town signs |
+| 0.44 - 0.73 | mountain pass: road climbs ~45 m, rock wall on one side, valley and snowy peaks on the other |
+| 0.77 - 0.88 | GPU campus: data-centre halls with cooling units, "GPU CAMPUS" facade sign, wind turbines |
+| 0.89 - 0.99 | farmland: patchwork fields, red barns, hay bales, wind turbines |
+
+Talk-themed billboards (RSI "improve yourself... recursively", "time horizon x2 every 4 months",
+"agents working nonstop", "fresh tokens farm shop") and gantries are drawn in `src/textures.c`.
+`--at F` starts at a given loop fraction, handy for checking a zone.
 
 ## Build and run (macOS)
 
@@ -80,6 +108,7 @@ Command-line options (`./build/highway --help`):
 | `--slides PATH` | slides file (default `slides.txt`) |
 | `--demo` | free-roaming traffic demo instead of the presentation |
 | `--no-intro` | skip the title screen |
+| `--at F` | start at fraction F of the loop (0.2 forest, 0.36 village, 0.58 mountain, 0.8 campus, 0.93 farm) |
 | `--cam N` | start camera: 0 present, 1 chase, 2 bumper, 3 heli, 4 TV |
 | `--res N` | render resolution: 0 = 240p, 1 = 360p, 2 = 540p, 3 = 720p (default), 4 = native |
 | `--car N` | follow car N (0 = player) |
