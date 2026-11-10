@@ -799,17 +799,19 @@ void present_set_autostart(bool on) {
     P.start_timer = on ? 1.0f : 0.0f;
 }
 
-void present_next(traffic_t* t) {
+bool present_next(traffic_t* t) {
     P.start_timer = 0.0f;
     slide_t* cs = active_chart_slide();
     if (cs && cs->anim.step < chart_num_steps(cs->chart) - 1) {
         chart_anim_snap(&cs->anim, cs->chart);   // finish the running step first
         cs->anim.step++;
-        return;
+        return true;
     }
     if (P.current + 1 < P.nslides) {
         show_slide(t, P.current + 1, false);
+        return true;
     }
+    return false;
 }
 
 void present_prev(traffic_t* t) {

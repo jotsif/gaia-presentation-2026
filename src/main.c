@@ -37,11 +37,16 @@ typedef struct {
     float wave[4];
     float rise[4];
     float misc[4];
+    mat4 vp;
+    float hole[4];
+    float hole2[4];
 } vs_params_t;
 
 typedef struct {
     float res[4];
     float flags[4];
+    float hole[4];
+    float hole2[4];
 } disp_params_t;
 
 static const char* CAM_NAMES[CAM_NUM] = { "PRESENT CAM", "CHASE CAM", "BUMPER CAM", "HELI CAM", "TV CAM" };
@@ -143,11 +148,54 @@ static struct {
     float fog_end, neon, windows;
 } ENV;
 
+// Finale: "next" on the last slide makes the whole world collapse, in slow motion, into a
+// singularity hovering above the road ahead. Timeline in units of COLLAPSE_TIME (q):
+//   0..1     the collapse front sweeps outwards, everything behind it spirals in and heats up
+//   1..1.05  the horizon shrinks to a point, white flash
+//   1.05..1.3 fade to black
+#define COLLAPSE_TIME    40.0f      // seconds until everything has fallen in
+#define COLLAPSE_HEIGHT  160.0f     // singularity height above the road (m)
+#define COLLAPSE_AHEAD   520.0f     // ... and distance ahead of the player car (m)
+#define COLLAPSE_ORBIT_R 950.0f     // camera orbit radius around it (m)
+static struct {
+    bool active;
+    float t;                // seconds since the collapse started
+    vec3 centre;
+    vec3 eye0, target0;     // camera when the collapse started
+    float fov0;             // degrees
+    float orbit0;           // starting orbit angle (keeps the camera on its side)
+} COL;
+static mat4 g_vp;           // view-projection of the current frame
+
+// Opening fly-in: after "press a button to start", dip to black, then descend slowly from
+// high above the valley down to the player car; the first slide van arrives as it settles.
+#define FLYIN_TIME      11.0f       // seconds of descent
+#define FLYIN_DIP       0.35f       // fade to black before the cut to the aerial shot
+#define FLYIN_VAN_LEAD  4.5f        // send the first slide van this long before the end
+static struct {
+    bool active;
+    bool van_sent;
+    float t;                // < 0 while dipping to black
+    float fog_scale;        // pushes the fog out while the camera is high up
+} FLY;
+static void flyin_finish(void);
+
+static float collapse_q(void) {
+    return COL.t / COLLAPSE_TIME;
+}
+
+// radius of the collapse front: slow at first, then sweeping out to the edge of the world
+static float collapse_front(float q) {
+    return 12000.0f * powf(fmaxf(q, 0.0f), 2.2f);
+}
+
 static float future_radius(float t) {
     return t * (30.0f + 1.5f * t);
 }
 
 static bool g_no_intro = false;              // --no-intro: skip the title screen
+static bool g_finale_pending = false;        // --finale: start it once the camera is set up
+static float g_finale = -1.0f;               // --finale S: seconds into the finale
 static int g_next_at[16], g_num_next_at = 0;   // --next-at N: scripted "next slide" at frame N (testing)
 
 // ---------------------------------------------------------------------------
@@ -622,6 +670,35 @@ static void update_camera(float dt) {
         } break;
     }
     #undef FIT_FOV
+    if (FLY.active && FLY.t >= 0.0f) {
+        // start high above and behind the car, looking down the road into the valley,
+        // and descend into the normal shot (the aerial pose follows the moving car)
+        vec3 ahead = track_frame(c->s + (float)c->dir * 520.0f).pos;
+        vec3 a_target = v3_mad(ahead, up, 120.0f);
+        vec3 a_eye = v3_mad(v3_mad(a_target, fwd_h, -950.0f), up, 430.0f);
+        a_eye.y = fmaxf(a_eye.y, terrain_height(a_eye.x, a_eye.z, NULL) + 60.0f);
+        float u = clampf(FLY.t / FLYIN_TIME, 0.0f, 1.0f);
+        float k = u * u * u * (u * (u * 6.0f - 15.0f) + 10.0f);   // smootherstep
+        eye = v3_lerp(a_eye, eye, k);
+        target = v3_lerp(a_target, target, k);
+        fov = lerpf(55.0f, fov, k);
+        FLY.fog_scale = lerpf(3.5f, 1.0f, k);
+    } else {
+        FLY.fog_scale = 1.0f;
+    }
+    if (COL.active) {
+        // ease into a slow orbit around the singularity, shaking more as it grows
+        float q = collapse_q();
+        float b = smoothstepf(0.0f, 9.0f, COL.t);
+        float a = COL.orbit0 + COL.t * 0.035f;
+        float r = lerpf(COLLAPSE_ORBIT_R, COLLAPSE_ORBIT_R * 0.75f, smoothstepf(0.0f, 1.0f, q));
+        vec3 orbit = v3_add(COL.centre, v3(cosf(a) * r, 430.0f, sinf(a) * r));
+        float amp = 3.0f * smoothstepf(0.15f, 1.0f, q) * (1.0f - smoothstepf(1.0f, 1.08f, q));
+        vec3 shake = v3(sinf(S.time * 23.0f) * amp, sinf(S.time * 31.0f + 1.0f) * amp, sinf(S.time * 27.0f + 2.0f) * amp);
+        eye = v3_lerp(COL.eye0, orbit, b);
+        target = v3_add(v3_lerp(COL.target0, COL.centre, b), shake);
+        fov = lerpf(COL.fov0, 55.0f, b);
+    }
     S.cam_eye = eye;
     S.cam_target = target;
     S.cam_fov = fov * PI_F / 180.0f;
@@ -706,14 +783,77 @@ static void update_future(float dt) {
 }
 
 // ---------------------------------------------------------------------------
+//  Finale: collapse into a singularity
+// ---------------------------------------------------------------------------
+// t0 > 0 starts it as if it began t0 seconds ago (--finale)
+static void collapse_start(float t0) {
+    if (COL.active) {
+        return;
+    }
+    const car_t* hero = &S.traffic.cars[0];
+    vec3 road = track_frame(hero->s + (float)hero->dir * COLLAPSE_AHEAD).pos;
+    float ground = FUT.active ? fmaxf(road.y, city_ground_y()) : road.y;
+    COL.active = true;
+    COL.t = t0;
+    COL.centre = v3(road.x, ground + COLLAPSE_HEIGHT, road.z);
+    COL.eye0 = S.cam_eye;
+    COL.target0 = S.cam_target;
+    COL.fov0 = S.cam_fov * 180.0f / PI_F;
+    vec3 back = v3_sub(S.cam_eye, COL.centre);
+    COL.orbit0 = atan2f(back.z, back.x);
+    printf("[highway] finale: the world collapses into a singularity (%.0f s)\n", COLLAPSE_TIME);
+}
+
+static void collapse_cancel(void) {
+    COL.active = false;
+    S.cam_snap = true;
+}
+
+// darkens the lighting environment (runs after update_future each frame)
+static void update_collapse(float dt) {
+    if (!COL.active) {
+        return;
+    }
+    COL.t += dt;
+    float k = smoothstepf(0.04f, 0.5f, collapse_q());
+    ENV.fog = v3_lerp(ENV.fog, v3(0.01f, 0.0f, 0.02f), k);
+    ENV.fog_end = lerpf(ENV.fog_end, 7000.0f, k);
+    ENV.amb = v3_scale(ENV.amb, 1.0f - 0.6f * k);
+    ENV.sun = v3_scale(ENV.sun, 1.0f - 0.5f * k);
+}
+
+// "next": advance the slides; past the last slide, start the finale
+static void present_advance(void) {
+    if (FLY.active) {
+        flyin_finish();
+        return;
+    }
+    if (COL.active) {
+        return;
+    }
+    if (!present_next(&S.traffic) && present_current_slide() == present_slide_count() - 1) {
+        collapse_start(0.0f);
+    }
+}
+
+// "previous": during the finale, undo it (handy when rehearsing)
+static void present_back(void) {
+    if (COL.active) {
+        collapse_cancel();
+        return;
+    }
+    present_prev(&S.traffic);
+}
+
+// ---------------------------------------------------------------------------
 //  Rendering
 // ---------------------------------------------------------------------------
 static vs_params_t base_params(void) {
     vs_params_t p;
     memset(&p, 0, sizeof(p));
     p.model = m4_identity();
-    p.cam_pos[0] = S.cam_eye.x; p.cam_pos[1] = S.cam_eye.y; p.cam_pos[2] = S.cam_eye.z; p.cam_pos[3] = FOG_START;
-    p.light_dir[0] = S.light_dir.x; p.light_dir[1] = S.light_dir.y; p.light_dir[2] = S.light_dir.z; p.light_dir[3] = ENV.fog_end;
+    p.cam_pos[0] = S.cam_eye.x; p.cam_pos[1] = S.cam_eye.y; p.cam_pos[2] = S.cam_eye.z; p.cam_pos[3] = FOG_START * FLY.fog_scale;
+    p.light_dir[0] = S.light_dir.x; p.light_dir[1] = S.light_dir.y; p.light_dir[2] = S.light_dir.z; p.light_dir[3] = ENV.fog_end * FLY.fog_scale;
     p.fog_color[0] = ENV.fog.x; p.fog_color[1] = ENV.fog.y; p.fog_color[2] = ENV.fog.z; p.fog_color[3] = 0.0f;
     p.sun_color[0] = ENV.sun.x; p.sun_color[1] = ENV.sun.y; p.sun_color[2] = ENV.sun.z;
     p.amb_color[0] = ENV.amb.x; p.amb_color[1] = ENV.amb.y; p.amb_color[2] = ENV.amb.z;
@@ -722,6 +862,13 @@ static vs_params_t base_params(void) {
     p.snap[1] = (float)S.rt_h * 0.5f;
     p.snap[2] = S.jitter ? 1.0f : 0.0f;
     p.snap[3] = S.affine ? 1.0f : 0.0f;
+    p.vp = g_vp;
+    if (COL.active) {
+        p.hole[0] = COL.centre.x; p.hole[1] = COL.centre.y; p.hole[2] = COL.centre.z;
+        p.hole[3] = collapse_front(collapse_q());
+        p.hole2[0] = 1.0f;
+        p.hole2[1] = 4.0f;   // swirl
+    }
     return p;
 }
 
@@ -765,7 +912,7 @@ static void render_signs(mat4 vp, sg_sampler smp) {
                 sg_apply_uniforms(0, &SG_RANGE(p));
                 draw_mesh(&S.sign_frame, S.tex_white, smp, 0, S.sign_frame.count);
             } else {
-                bool top = signs[i].on_top && S.cam_mode == CAM_PRESENT;
+                bool top = signs[i].on_top && S.cam_mode == CAM_PRESENT && !COL.active;
                 p.fog_color[3] = 1.0f;   // unlit, no fog: keeps the text crisp and bright
                 p.snap[2] = 0.0f;        // no vertex jitter on the slide
                 // only draw the face that looks towards the camera (vertices 0..5 rear, 6..11 front)
@@ -783,6 +930,7 @@ static void render_scene(void) {
     mat4 proj = m4_perspective_revz(S.cam_fov, aspect, 0.3f);
     mat4 view = m4_lookat(S.cam_eye, S.cam_target, v3(0, 1, 0));
     mat4 vp = m4_mul(proj, view);
+    g_vp = vp;
     sg_sampler smp = S.bilinear ? S.smp_linear : S.smp_nearest;
 
     sg_begin_pass(&(sg_pass){
@@ -801,6 +949,8 @@ static void render_scene(void) {
         p.mvp = m4_mul(vp, p.model);
         p.fog_color[3] = 1.0f;   // unlit, no fog
         p.snap[2] = 0.0f;
+        p.hole2[0] = 0.0f;       // the sky does not fall in, it goes dark
+        p.hole2[2] = COL.active ? smoothstepf(0.03f, 0.45f, collapse_q()) : 0.0f;
         sg_apply_pipeline(S.pip_sky);
         sg_apply_uniforms(0, &SG_RANGE(p));
         draw_mesh(&S.sky, S.tex_sky, S.bilinear ? S.smp_sky_linear : S.smp_sky_nearest, 0, S.sky.count);
@@ -1028,9 +1178,46 @@ static void intro_start(void) {
         return;
     }
     S.intro_leaving = true;
-    S.cam_mode = CAM_PRESENT;
+    FLY.active = true;          // the camera switch and first slide follow in update_flyin
+    FLY.van_sent = false;
+    FLY.t = -FLYIN_DIP;
+}
+
+static void flyin_send_van(void) {
+    if (!FLY.van_sent) {
+        FLY.van_sent = true;
+        present_next(&S.traffic);   // the first slide van starts driving up
+    }
+}
+
+// skip straight to the end of the fly-in
+static void flyin_finish(void) {
+    if (FLY.t < 0.0f) {
+        S.cam_mode = CAM_PRESENT;
+    }
+    flyin_send_van();
+    FLY.active = false;
+    S.fade_black = 0.0f;
     S.cam_snap = true;
-    present_next(&S.traffic);   // the first slide van starts driving up
+}
+
+static void update_flyin(float dt) {
+    if (!FLY.active) {
+        return;
+    }
+    float prev = FLY.t;
+    FLY.t += dt;
+    if (prev < 0.0f && FLY.t >= 0.0f) {   // cut to the aerial shot under the black
+        S.cam_mode = CAM_PRESENT;
+        S.cam_snap = true;
+    }
+    S.fade_black = (FLY.t < 0.0f) ? 1.0f + FLY.t / FLYIN_DIP : fmaxf(0.0f, 1.0f - FLY.t / 1.2f);
+    if (FLY.t >= FLYIN_TIME - FLYIN_VAN_LEAD) {
+        flyin_send_van();
+    }
+    if (FLY.t >= FLYIN_TIME) {
+        FLY.active = false;
+    }
 }
 
 static void draw_hud(void) {
@@ -1052,10 +1239,10 @@ static void draw_hud(void) {
     if (S.present_mode) {
         // keep the screen clean: only a small slide counter (H shows the full HUD)
         int cur = present_current_slide();
-        if (cur >= 0) {
+        if (cur >= 0 && !COL.active) {
             hud_text((float)(cols - 8), (float)(rows - 2), 200, 200, 210, "%2d/%-2d", cur + 1, present_slide_count());
         }
-        if (S.cam_mode != CAM_PRESENT && S.show_hud) {
+        if (S.cam_mode != CAM_PRESENT && S.show_hud && !COL.active) {
             hud_text(1, (float)(rows - 2), 160, 255, 160, "%s", CAM_NAMES[S.cam_mode]);
         }
     }
@@ -1124,6 +1311,27 @@ static void render_display(void) {
         .res = { (float)S.rt_w, (float)S.rt_h, 0, 0 },
         .flags = { S.dither ? 1.0f : 0.0f, S.scanlines ? 0.35f : 0.0f, S.intro_dim, S.fade_black },
     };
+    if (COL.active) {
+        // event horizon: grows while the world falls in, then shrinks to a point and flashes
+        float q = collapse_q();
+        const float* m = g_vp.m;
+        vec3 c = COL.centre;
+        float cx = m[0] * c.x + m[4] * c.y + m[8] * c.z + m[12];
+        float cy = m[1] * c.x + m[5] * c.y + m[9] * c.z + m[13];
+        float cw = m[3] * c.x + m[7] * c.y + m[11] * c.z + m[15];
+        float flash_in = smoothstepf(1.0f, 1.04f, q);
+        if (cw > 0.01f && flash_in < 1.0f) {
+            float rs = 0.075f * smoothstepf(0.04f, 0.8f, q) * (1.0f - 0.95f * smoothstepf(0.85f, 1.0f, q));
+            dp.hole[0] = cx / cw * 0.5f + 0.5f;
+            dp.hole[1] = 0.5f - cy / cw * 0.5f;
+            dp.hole[2] = rs;
+            dp.hole[3] = 0.6f + 1.6f * smoothstepf(0.6f, 1.0f, q);
+            dp.hole2[2] = 0.8f * (1.0f - flash_in);
+        }
+        dp.hole2[0] = (float)S.rt_w / (float)S.rt_h;
+        dp.hole2[1] = flash_in * (1.0f - smoothstepf(1.06f, 1.3f, q));
+        dp.hole2[3] = smoothstepf(1.08f, 1.3f, q);
+    }
     sg_apply_pipeline(S.pip_display);
     sg_apply_bindings(&(sg_bindings){ .views[0] = S.rt_color_tex, .samplers[0] = S.smp_display });
     sg_apply_uniforms(0, &SG_RANGE(dp));
@@ -1189,6 +1397,7 @@ static void frame(void) {
 
     traffic_update(&S.traffic, dt);
     update_future(dt);
+    update_collapse(dt);
 
     int lap = (int)(hero->odo / (double)S.traffic.L);
     if (lap > S.lap) {
@@ -1228,6 +1437,7 @@ static void frame(void) {
             S.cam_snap = true;
         }
     }
+    update_flyin(dt);
     if (S.help_timer > 0.0f) {
         S.help_timer -= dt;
         if (S.help_timer <= 0.0f) {
@@ -1250,6 +1460,10 @@ static void frame(void) {
     }
     bool snapped = S.cam_snap;
     update_camera(dt);
+    if (g_finale_pending) {
+        g_finale_pending = false;
+        collapse_start(g_finale);
+    }
     S.cam_snap = snapped;
     update_sign_orientation(dt);
     S.cam_snap = false;
@@ -1270,7 +1484,7 @@ static void frame(void) {
             if (S.intro && !S.intro_leaving) {
                 intro_start();
             } else {
-                present_next(&S.traffic);
+                present_advance();
             }
         }
     }
@@ -1327,19 +1541,19 @@ static void event(const sapp_event* e) {
     }
     if (S.present_mode) {
         if (e->type == SAPP_EVENTTYPE_MOUSE_DOWN) {
-            if (e->mouse_button == SAPP_MOUSEBUTTON_LEFT) present_next(&S.traffic);
-            if (e->mouse_button == SAPP_MOUSEBUTTON_RIGHT) present_prev(&S.traffic);
+            if (e->mouse_button == SAPP_MOUSEBUTTON_LEFT) present_advance();
+            if (e->mouse_button == SAPP_MOUSEBUTTON_RIGHT) present_back();
             return;
         }
         if (e->type == SAPP_EVENTTYPE_KEY_DOWN && !e->key_repeat) {
             switch (e->key_code) {
                 case SAPP_KEYCODE_SPACE: case SAPP_KEYCODE_RIGHT: case SAPP_KEYCODE_DOWN:
                 case SAPP_KEYCODE_PAGE_DOWN: case SAPP_KEYCODE_ENTER: case SAPP_KEYCODE_N:
-                    present_next(&S.traffic);
+                    present_advance();
                     return;
                 case SAPP_KEYCODE_LEFT: case SAPP_KEYCODE_UP: case SAPP_KEYCODE_PAGE_UP:
                 case SAPP_KEYCODE_BACKSPACE:
-                    present_prev(&S.traffic);
+                    present_back();
                     return;
                 default: break;
             }
@@ -1424,6 +1638,7 @@ static void print_usage(void) {
            "  --car N          follow car N (0 = player)\n"
            "  --fullscreen     start in fullscreen\n"
            "  --future [S]     start in the future city (S seconds into the transition, default 300)\n"
+           "  --finale [S]     start the singularity finale right away (S seconds into it, default 0)\n"
            "  --shot PATH      save a PNG screenshot after --shot-frame frames and quit\n"
            "  --shot-frame N   frame for --shot (default 240)\n");
 }
@@ -1451,9 +1666,13 @@ static void apply_cli_settings(void) {
     if (g_future >= 0.0f) {
         future_start(150.0f, g_future);
     }
+    if (g_finale >= 0.0f) {
+        g_finale_pending = true;
+    }
 }
 
 static void init_cb(void) {
+    FLY.fog_scale = 1.0f;
     init();
     apply_cli_settings();
 }
@@ -1477,6 +1696,10 @@ sapp_desc sokol_main(int argc, char* argv[]) {
         else if (!strcmp(a, "--future")) {
             g_future = 300.0f;
             if (i + 1 < argc && argv[i + 1][0] != '-') g_future = (float)atof(argv[++i]);
+        }
+        else if (!strcmp(a, "--finale")) {
+            g_finale = 0.0f;
+            if (i + 1 < argc && argv[i + 1][0] != '-') g_finale = (float)atof(argv[++i]);
         }
         else if (!strcmp(a, "--at") && has_val) { g_start_at = (float)atof(argv[++i]); }
         else if (!strcmp(a, "--slides") && has_val) { S.slides_path = argv[++i]; }

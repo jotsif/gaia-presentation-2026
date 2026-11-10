@@ -27,7 +27,8 @@ void present_update(traffic_t* t, float dt);
 void present_set_autostart(bool on);
 // distance (m, centre to centre) the presenting van keeps ahead of the player car
 void present_set_gap(float gap);
-void present_next(traffic_t* t);
+// returns false when there is nothing left to advance (past the last slide)
+bool present_next(traffic_t* t);
 void present_prev(traffic_t* t);
 int present_slide_count(void);
 int present_current_slide(void);   // -1 before the first slide arrives
