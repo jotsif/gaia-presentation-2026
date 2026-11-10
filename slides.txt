@@ -12,26 +12,32 @@
 - Keep it only if it beats a human hire
 - AI does 50% of all economically valuable tasks: test passed
 ---
-// ===== Slide 2: Narrow AI squared =====
+// ===== Slide 2: How models are trained in 2026 =====
+## Training in 2026
+- NTP pre-training
+- RL post-training: RLVR, RLAIF
+- Just as we discussed at last year's annual meeting
+---
+// ===== Slide 3: Narrow AI squared =====
 @image slides/narrow ai squared.png
 ---
-// ===== Slide 3: Prediction 2025 (part 1) =====
+// ===== Slide 4: Prediction 2025 (part 1) =====
 @image slides/prediction slide 1 2025.png
 ---
-// ===== Slide 4: Prediction 2025 (part 2) =====
+// ===== Slide 5: Prediction 2025 (part 2) =====
 @image slides/prediction slide 2 2025.png
 ---
-// ===== Slide 5: LMArena Elo - the leader climbs, each model stays flat =====
+// ===== Slide 6: LMArena Elo - the leader climbs, each model stays flat =====
 ### Top rises, models flat
 @chart slides/arena_anchor_ratings.csv
 @source Data: LMArena (Elo)
 ---
-// ===== Slide 6: LMArena win rate vs. the top model =====
+// ===== Slide 7: LMArena win rate vs. the top model =====
 ### Yesterday's best loses
 @chart slides/arena_anchor_winrate_vs_top.csv
 @source Data: LMArena (win rate vs. top model)
 ---
-// ===== Slide 7: ECI (animated Epoch AI chart) =====
+// ===== Slide 8: ECI (animated Epoch AI chart) =====
 ### ECI: +17 points/year
 @chart slides/benchmark_data/epoch_capabilities_index/eci_scores.csv
 @source Data: Epoch Capabilities Index, Epoch AI (CC BY)
@@ -44,7 +50,19 @@
 @label "Qwen3-235B-A22B-Thinking (Jul 2025)" Qwen3 235B
 @label "DeepSeek V4.1 Flash 1017" DeepSeek V4.1
 ---
-// ===== Slide 8: 50% time horizon (animated METR chart) =====
+// ===== Slide 9: Theory 1/3 - one step (Rasch / IRT) =====
+### 1  One step
+@theory step
+---
+// ===== Slide 10: Theory 2/3 - a task of D steps (O-ring) =====
+### 2  A task of D steps
+@theory task
+---
+// ===== Slide 11: Theory 3/3 - the 50% horizon =====
+### 3  The 50% horizon
+@theory horizon
+---
+// ===== Slide 12: 50% time horizon (animated METR chart) =====
 ### Doubling every 4 mo.
 @chart slides/metr-benchmark-results-1-1.yaml
 @label davinci_002 GPT-3
@@ -59,25 +77,13 @@
 @label claude_mythos_preview_early_inspect Mythos Preview
 @source Data: METR 50% time horizon
 ---
-// ===== Slide 9: Theory 1/3 - one step (Rasch / IRT) =====
-### 1  One step
-@theory step
----
-// ===== Slide 10: Theory 2/3 - a task of D steps (O-ring) =====
-### 2  A task of D steps
-@theory task
----
-// ===== Slide 11: Theory 3/3 - the 50% horizon =====
-### 3  The 50% horizon
-@theory horizon
----
-// ===== Slide 12: Shockley (1957) - productivity in research labs =====
+// ===== Slide 13: Shockley (1957) - productivity in research labs =====
 @camera present
 ### Same math for humans
 @source Shockley 1957: output = product of many factors
 @image slides/productivity.png
 ---
-// ===== Slide 13: GDPval-AA v2 - what the benchmark measures =====
+// ===== Slide 14: GDPval-AA v2 - what the benchmark measures =====
 @camera chase
 ## GDPval-AA v2
 @source Artificial Analysis, based on OpenAI's GDPval
@@ -85,13 +91,13 @@
 - The agent delivers real files: docs, sheets, slides
 - Compared pairwise: Elo score
 ---
-// ===== Slide 14: GDPval-AA v2 - model Elo vs. human experts =====
+// ===== Slide 15: GDPval-AA v2 - model Elo vs. human experts =====
 @camera present
 ### AI beats human experts
 @chart slides/gdpval_aa_v2.csv
 @source Data: GDPval-AA v2, Artificial Analysis
 ---
-// ===== Slide 15: GDPx (SemiAnalysis) - what the benchmark measures =====
+// ===== Slide 16: GDPx (SemiAnalysis) - what the benchmark measures =====
 @camera bumper
 ## GDPx
 @source SemiAnalysis, gdpx.semianalysis.com
@@ -100,13 +106,13 @@
 - From 14 specialist data partners
 - Score = avg % solved, all domains equal
 ---
-// ===== Slide 16: GDPx - results =====
+// ===== Slide 17: GDPx - results =====
 @camera present
 ### ...but 12% on hard work
 @chart slides/gdpx_semianalysis.csv
 @source Data: GDPx v1.0, SemiAnalysis
 ---
-// ===== Slide 17: Back to the economic Turing test - are we there? =====
+// ===== Slide 18: Back to the economic Turing test - are we there? =====
 @camera heli
 ### Economic Turing test
 ## Are we there?
@@ -114,40 +120,40 @@
 - Hard end-to-end work: 12%
 - Not passed... yet
 ---
-// ===== Slide 18: METR - Independent Assessment of AI R&D Acceleration at Anthropic =====
+// ===== Slide 19: METR - Independent Assessment of AI R&D Acceleration at Anthropic =====
 @camera heli
 @image slides/Ant METR.png
 ---
-// ===== Slide 19: METR quote - about 2x faster =====
+// ===== Slide 20: METR quote - about 2x faster =====
 @camera present
 > As of October 2026, Anthropic is likely improving the capabilities of their models on well-specified tasks at around twice the rate they did between March 2024 and October 2025. This estimate is given with high uncertainty; we would not be surprised if the true acceleration was closer to 1.3x or 3x the historical rate.
 -- METR, Nov 2026
 ---
-// ===== Slide 20: METR quote - mostly from AI doing R&D =====
+// ===== Slide 21: METR quote - mostly from AI doing R&D =====
 > A majority of this acceleration today is likely attributable to Anthropic's extensive use of AI to do R&D, though there is significant uncertainty and other causes likely played a large role in acceleration in late 2025.
 -- METR, Nov 2026
 ---
-// ===== Slide 21: METR quote - risk of even faster acceleration =====
+// ===== Slide 22: METR quote - risk of even faster acceleration =====
 > The lack of observed bottlenecks or strong diminishing returns means there is a significant risk that further capabilities progress could lead to even faster acceleration, though, as we say below, we may be missing important bottlenecks.
 -- METR, Nov 2026
 ---
-// ===== Slide 22: METR - AECI benchmark growth 1.9x (RSI improvements) - starts the future city =====
+// ===== Slide 23: METR - AECI benchmark growth 1.9x (RSI improvements) - starts the future city =====
 @camera present
 @futurecity
 @image slides/RSI improvements.png
 ---
-// ===== Slide 23: Kurzweil - The Singularity Is Near (book cover) =====
+// ===== Slide 24: Kurzweil - The Singularity Is Near (book cover) =====
 @camera heli
 @image slides/Kurzweil.png
 ---
-// ===== Slide 24: My prediction for 2027 (1/2) - the physical world is the limit =====
+// ===== Slide 25: My prediction for 2027 (1/2) - the physical world is the limit =====
 @camera chase
 ### 2027 prediction 1/2
 ## The physical world
 ## is the limit
 The physical world is becoming the limitation in producing everything needed to meet the demand for compute.
 ---
-// ===== Slide 25: My prediction for 2027 (2/2) - AI labs verticalise =====
+// ===== Slide 26: My prediction for 2027 (2/2) - AI labs verticalise =====
 @camera bumper
 ### 2027 prediction 2/2
 ## AI labs verticalise
@@ -156,7 +162,7 @@ The physical world is becoming the limitation in producing everything needed to 
 - Own factories
 ### Every bottleneck must be controlled and optimised
 ---
-// ===== Slide 26: Thank you (heli cam over the city at dusk) =====
+// ===== Slide 27: Thank you (heli cam over the city at dusk) =====
 @camera heli
 # Thank you
 

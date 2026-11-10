@@ -15,8 +15,9 @@ billboards and all textures, including a small pixel font. The app has no asset 
 
 The app opens on a 90s-style title screen ("Welcome to the GAIA annual meeting 2026 ...",
 blinking PRESS A BUTTON TO START) over a dimmed, auto-filmed highway. Any key, clicker
-button or mouse click starts the talk: the title fades out and the first slide van drives
-up. `--no-intro` skips it (the title text lives in `draw_title_screen()` in `src/main.c`).
+button or mouse click starts the talk: the title fades out, the camera dips to black and
+then descends slowly (about 11 s) from high above the valley down to your car, and the first
+slide van drives up as it settles ("next" during the fly-in skips it). `--no-intro` skips it (the title text lives in `draw_title_screen()` in `src/main.c`).
 
 Slides live in `slides.txt` (or `--slides PATH`) and are read at startup:
 
@@ -95,6 +96,11 @@ Plain text
 | H | show camera name, F1 key help |
 | G | start the future-city phase by hand |
 
+**Finale:** pressing "next" on the last slide makes the whole world collapse, in slow motion
+(about 40 s), into a singularity above the road ahead: everything spirals in, heats up and
+falls through a lensed black event horizon, which then shrinks to a point, flashes white and
+fades to black. "Previous" during the finale cancels it (handy when rehearsing).
+
 Most presentation clickers send PageDown/PageUp or arrow keys, so they work out of the box.
 Run with `--demo` for the original free-roaming traffic demo.
 
@@ -157,6 +163,7 @@ Command-line options (`./build/highway --help`):
 | `--fullscreen` | start fullscreen |
 | `--future [S]` | start in the future city, S seconds into the transition (default 300) |
 | `--shot PATH` / `--shot-frame N` | save a PNG after N frames (default 240) and quit |
+| `--finale [S]` | start the singularity finale right away (S seconds into it) |
 | `--next-at N` | advance to the next slide at frame N (repeatable; for scripted screenshots) |
 
 ## Demo-mode controls (`--demo`)
